@@ -87,7 +87,7 @@ class Trainer():
                         modules.print_all_torch_tensors()
                         actions = perturbed_model.forward(observations.permute([0,3,1,2]).type(precision))
                         modules.print_all_torch_tensors()
-                        time.sleep(1000)
+                        # time.sleep(1000)
                         print("nn time", time.time() - start)
                         start = time.time()
                         observations, reward, done, info = env.step(actions)
