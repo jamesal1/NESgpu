@@ -3,25 +3,6 @@ Optimized PyTorch GPU implementation of Natural Evolution Strategies/Augmented R
 
 See https://github.com/jamesal1/NESgpu/wiki/Explanation-of-Design-Decisions for an explanation of the optimizations.
 
-## How to use
-
-1. Replace the paramaterized layers in the base model with perturbed versions (i.e. Linear -> PerturbedLinear), passing in the population size using the directions parameter.
-
-2. Initialize the wrapper as perturbed_model = PerturbedModel(base_model, directions). To run in evaluation mode, call base_model.function(). To run in training mode, call perturbed_model.function(), which will set the layers to training mode and then call base_model.function().
-
-3. For each training iteration:
-
-    3.1 Initialize noise tensors by calling perturbed_model.set_noise().
-    
-    3.2 Using torch.no_grad(), calculate the training loss. The batch size should be an even multiple of the population size for antithetic sampling, in which case the input should be in the shape of (repeat_size, directions, ...), and the second half of the repeats will use the negated noise vector. The batch size can also be set to be equal to the population size, in which case antithetic sampling will not be used.
-    
-    3.3 Calculate the update weights as desired, then call perturbed_model.set_grad(weights), then step the optimizer.
-    
-4. Before saving the model, call perturbed_model.free_memory() to delete all noise tensors.
-
-
-
-
 ## Forward Pass Performance
 Experiments were done on a GeForce 1080 Ti, with a batch size of 1024. The format for the column headers are (out dimension, in dimension) for the dense layers and (out_channels, in channels, filter_size, input_size) for the convolutional layers. 
 
@@ -79,3 +60,19 @@ The naive time is calculated by running the layer in evaluation mode with a batc
 | PermutedConv2d  |                         2.56 |                         2.58 |                         2.5  |                         3.23 |                           2.22 |
 | Base            |                         1    |                         1    |                         1    |                         1    |                           1    |
 | Naive           |                         6.23 |                         3.11 |                         5.9  |                        22.21 |                         263.24 |
+
+## How to use
+
+1. Replace the paramaterized layers in the base model with perturbed versions (i.e. Linear -> PerturbedLinear), passing in the population size using the directions parameter. PermutedLinear and PermutedConv2d are the most recommended to use, as they are fast and don't use large amounts of memory.
+
+2. Create the wrapper as perturbed_model = PerturbedModel(base_model, directions). To run in evaluation mode, call base_model.my_function(). To run in training mode, call perturbed_model.my_function(), which will set the layers to training mode and then call base_model.my_function().
+
+3. For each training iteration:
+
+    3.1 Initialize noise tensors by calling perturbed_model.set_noise().
+    
+    3.2 Using torch.no_grad(), calculate the training loss. The batch size should be an even multiple of the population size for antithetic sampling, in which case the input should be in the shape of (repeat_size, directions, ...), and the second half of the repeats will use the negated noise vector. The batch size can also be set to be equal to the population size, in which case antithetic sampling will not be used.
+    
+    3.3 Calculate the update weights as desired, then call perturbed_model.set_grad(weights), then step the optimizer.
+    
+4. Before saving the model, call perturbed_model.free_memory() to delete all noise tensors.
