@@ -1,5 +1,5 @@
 from modules import *
-
+from collections import defaultdict
 
 def lin_vs_conv(device="cpu"):
     times = 5
@@ -140,10 +140,7 @@ def test_perm_conv(device="cuda"):
     # l = PerturbedConv2d(c_in,c_out,(x,y),d).to(device)
 
     for _ in range(10):
-        l.allocate_memory()
-        l.set_noise_scale(1.)
-        l.set_seed()
-        l.set_noise()
+        l.set_noise(1.)
         w = torch.rand(d,device=device)
         # w = torch.ones(d,device=device)
         torch.cuda.synchronize()
@@ -169,37 +166,80 @@ def test_perm_conv(device="cuda"):
         print("off",time.time() - start)
 
 
-def time_forward_median(layer, input, times):
+def time_forward_median(layer, input, times, repeat=1):
     results = []
     for _ in range(times):
         torch.cuda.synchronize()
         start = time.time()
-        layer.forward(input)
+        for _ in range(repeat):
+            layer.forward(input)
         torch.cuda.synchronize()
         results += [time.time() - start]
-    return sorted(results)[times//2]
+    return 1000 * sorted(results)[times//2]
 
-def test_linear(device="cuda",times=100):
-    for d,m,n in [(1024, 1024, 1024),(1024, 512, 512)]:
-
-        l = PerturbedLinear(n,m,d).to(device)
-        sl = SparsePerturbedLinear(n,m,d,sparsity=1).to(device)
-        pl = PermutedLinear(n,m,d,permutation="out").to(device)
-        for layer, name in [(l,"perturbed"),(sl,"sparse"),(pl,"permuted")]:
+def test_linear(device="cuda", batch_size=1024, times=100):
+    ret = defaultdict(lambda:dict())
+    for test in [(256, 256), (256, 256), (512, 512), (1024, 1024)]:
+        output_dim, input_dim = test
+        l = PerturbedLinear(input_dim, output_dim, batch_size).to(device)
+        s1 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=1).to(device)
+        s2 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=2).to(device)
+        pl = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
+        for layer, name in [(l, "PerturbedLinear"), (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"), (pl, "PermutedLinear")]:
             layer.allocate_memory()
             layer.set_noise_scale(1.)
             layer.set_seed()
             layer.set_noise()
             layer.perturbed_flag = True
 
-            inp = torch.rand(d,n,device=device)
-
-            print(name, time_forward_median(layer, inp, times))
+            inp = torch.rand(batch_size, input_dim, device=device)
+            ret[str(test)][name] = time_forward_median(layer, inp, times)
         l.perturbed_flag = False
-        print("off", time_forward_median(l, inp, times))
-        print("naive", d * time_forward_median(l, inp[0], times))
+        ret[str(test)]["Base"] = time_forward_median(l, inp, times)
+        ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
+    return ret
+
+def test_conv(device="cuda", batch_size=1024, times=100):
+    ret = defaultdict(lambda:dict())
+    for test in \
+            [(16, 16, (3, 3), (64, 64)),
+             (32, 32, (3, 3), (64, 64)),
+             (64, 64, (3, 3), (32, 32)),
+             (32, 32, (1, 1), (32, 32)),
+             (1024, 1, (32, 32), (32, 32)),
+             (1024, 1024, (1, 1), (1, 1))]:
+        output_dim, input_dim, filter_size, image_size = test
+        l = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size).to(device)
+        pl = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out").to(device)
+        for layer, name in [(l, "PerturbedConv2d"), (pl, "PermutedConv2d")]:
+            layer.set_noise(1.)
+            layer.perturbed_flag = True
+            inp = torch.rand(batch_size, input_dim, *image_size, device=device)
+            ret[str(test)][name] = time_forward_median(layer, inp, times)
+        l.perturbed_flag = False
+        ret[str(test)]["Base"] = time_forward_median(l, inp, times)
+        ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
+    return ret
 
 
+def to_markdown(result_dict):
+    import pandas
+    import json
+    j = json.dumps(result_dict)
+    df = pandas.read_json(json.dumps(result_dict))
+    print(df.round(3).to_markdown())
+    naive_dict = {}
+    for test, test_dict in result_dict.items():
+        naive_time = test_dict["Naive"]
+        naive_dict[test] = dict([(name, naive_time / time) for name, time in test_dict.items()])
+    naive_df = pandas.read_json(json.dumps(naive_dict))
+    print(naive_df.round(2).to_markdown())
+    base_dict = {}
+    for test, test_dict in result_dict.items():
+        base_time = test_dict["Base"]
+        base_dict[test] = dict([(name, time / base_time) for name, time in test_dict.items()])
+    base_df = pandas.read_json(json.dumps(base_dict))
+    print(base_df.round(2).to_markdown())
 
 
 
@@ -212,6 +252,8 @@ if __name__ == "__main__":
         # randperm_speed("cuda")
         # sparse_test("cuda")
         # test_perm_conv("cuda")
-        test_linear("cuda")
+        to_markdown(test_linear("cuda"))
+        to_markdown(test_linear("cuda"))
+        to_markdown(test_conv("cuda"))
         # test_linear("cuda")
         # test_add("cuda")

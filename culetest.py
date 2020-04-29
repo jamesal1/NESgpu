@@ -77,10 +77,7 @@ class Trainer():
             for _ in trange(self.batches_per_epoch):
                 with torch.no_grad():
                     repeat_size = self.batch_size // self.directions
-                    perturbed_model.set_seed()
-                    perturbed_model.set_noise_scale(self.noise_scale)
-                    perturbed_model.allocate_memory()
-                    perturbed_model.set_noise()
+                    perturbed_model.set_noise(self.noise_scale)
                     observations = env.reset()
                     step = 0
                     sum_reward_discount = torch.zeros(self.batch_size, device=cuda_device)
