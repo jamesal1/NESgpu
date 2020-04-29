@@ -4,7 +4,7 @@ Optimized PyTorch GPU implementation of Natural Evolution Strategies/Augmented R
 See https://github.com/jamesal1/NESgpu/wiki/Explanation-of-Design-Decisions for an explanation of the optimizations.
 
 ## Forward Pass Performance
-Experiments were done on a GeForce 1080 Ti, with a batch size of 1024. The format for the column headers are (out dimension, in dimension) for the dense layers and (out_channels, in channels, filter_size, input_size) for the convolutional layers. 
+Experiments were done on a GeForce 1080 Ti, with a batch size of 1024. The reported times are the median time of a 100 runs. The format for the column headers are (out dimension, in dimension) for the dense layers and (out_channels, in channels, filter_size, input_size) for the convolutional layers. 
 
 The base time is the time for the layer to compute a forward pass in evaluation mode; it represents an upper bound on the performance of the layer in training mode.
 
