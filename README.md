@@ -61,6 +61,8 @@ The naive time is calculated by running the layer in evaluation mode with a batc
 | Base            |                         1    |                         1    |                         1    |                         1    |                           1    |
 | Naive           |                         6.23 |                         3.11 |                         5.9  |                        22.21 |                         263.24 |
 
+To summarize, there are huge gains for dense layers. For certain convolutional layers that are already highly parallel, there are only modest gains versus the naive implementation.
+
 ## How to use
 
 1. Replace the paramaterized layers in the base model with perturbed versions (i.e. Linear -> PerturbedLinear), passing in the population size using the directions parameter. PermutedLinear and PermutedConv2d are the most recommended to use, as they are fast and don't use large amounts of memory.
