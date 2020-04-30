@@ -3,6 +3,8 @@ Optimized PyTorch GPU implementation of Natural Evolution Strategies/Augmented R
 
 NESgpu defines the Perturbed class, which streamlines the noise sampling and weight update process for NES and similar training algorithms. It directly allows for batch training, obtaining performance gains of **2-100x** (see below) over non-batched implementations.
 
+## Currently Defined Layers
+
 PerturbedLinear/PerturbedConv2d is the "default" implementation which adds Gaussian noise to its weights. Large amounts of memory are needed to store the Gaussian noise.
 
 PermutedLinear/PermutedConv2d reuses a single Gaussian noise vector in a shuffled manner for all population members. It is fast and has a low memory overhead. It introduces correlation between members, but in a manner which should have no practical impact.
@@ -72,7 +74,7 @@ The naive time is calculated by running the layer in evaluation mode with a batc
 To summarize, there are huge gains for dense layers. For certain convolutional layers that are already highly parallel, there are only modest gains versus the naive implementation.
 
 ## How to use
-All classes can be found in modules.py.
+All classes/layers can be found in modules.py.
 
 1. Replace the paramaterized layers in the base model with perturbed versions (i.e. Linear -> PerturbedLinear), passing in the population size using the directions parameter. PermutedLinear and PermutedConv2d are the most recommended to use, as they are fast and don't use large amounts of memory.
 
