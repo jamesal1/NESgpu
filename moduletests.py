@@ -184,8 +184,16 @@ def test_linear(device="cuda", batch_size=1024, times=100):
         l = PerturbedLinear(input_dim, output_dim, batch_size).to(device)
         s1 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=1).to(device)
         s2 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=2).to(device)
-        pl = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
-        for layer, name in [(l, "PerturbedLinear"), (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"), (pl, "PermutedLinear")]:
+        plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device)
+        pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device)
+        plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
+        splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.25).to(device)
+        spli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.25).to(device)
+        splb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device)
+        for layer, name in [(l, "PerturbedLinear"),
+                            (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"),
+                            (plo, "PermutedLinear(out)"), (pli, "PermutedLinear(in)"), (plb, "PermutedLinear(both)"),
+                            (splo, "SparsePermutedLinear(out)"), (spli, "SparsePermutedLinear(in)"), (splb, "SparsePermutedLinear(both)")]:
             layer.allocate_memory()
             layer.set_noise_scale(1.)
             layer.set_seed()
@@ -206,7 +214,6 @@ def test_conv(device="cuda", batch_size=1024, times=100):
              (32, 32, (3, 3), (64, 64)),
              (64, 64, (3, 3), (32, 32)),
              (32, 32, (1, 1), (32, 32)),
-             (1024, 1, (32, 32), (32, 32)),
              (1024, 1024, (1, 1), (1, 1))]:
         output_dim, input_dim, filter_size, image_size = test
         l = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size).to(device)
@@ -227,19 +234,23 @@ def to_markdown(result_dict):
     import json
     j = json.dumps(result_dict)
     df = pandas.read_json(json.dumps(result_dict))
+    print("### Time (ms, lower is better)")
     print(df.round(3).to_markdown())
+    print("### Speed multiplier vs. naive (higher is better)")
     naive_dict = {}
     for test, test_dict in result_dict.items():
         naive_time = test_dict["Naive"]
         naive_dict[test] = dict([(name, naive_time / time) for name, time in test_dict.items()])
     naive_df = pandas.read_json(json.dumps(naive_dict))
     print(naive_df.round(2).to_markdown())
+    print("### Time multiplier vs. base (lower is better)")
     base_dict = {}
     for test, test_dict in result_dict.items():
         base_time = test_dict["Base"]
         base_dict[test] = dict([(name, time / base_time) for name, time in test_dict.items()])
     base_df = pandas.read_json(json.dumps(base_dict))
     print(base_df.round(2).to_markdown())
+    print()
 
 
 

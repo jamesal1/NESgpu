@@ -57,7 +57,7 @@ class Trainer():
         self.model.batch_size=self.batch_size
         if half_precision:
             self.model = self.model.half()
-        perturbed_model = modules.PerturbedModel(self.model,self.directions)
+        perturbed_model = modules.PerturbedModel(self.model, self.directions)
         ave_delta = .005 * self.batch_size
         # opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
         opt = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
