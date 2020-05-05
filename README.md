@@ -60,8 +60,8 @@ The naive time is calculated by running the layer in evaluation mode with a batc
 |:--------------------------------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
 | PerturbedConv2d                       |                       22.623 |                       37.883 |                       26.877 |                       10.466 |                         83.89  |
 | PermutedConv2d                        |                       20.37  |                       40.625 |                       20.125 |                        6.205 |                          1.565 |
-| SparsePermutedConv2d(out_sparsity=.5) |                       21.622 |                       42.852 |                       19.034 |                        6.773 |                          1.218 |
-| SparsePermutedConv2d(out_sparsity=.1) |                       20.906 |                       40.743 |                       17.552 |                        6.447 |                          1.178 |
+| PermutedConv2d(out_sparsity=.5) |                       21.622 |                       42.852 |                       19.034 |                        6.773 |                          1.218 |
+| PermutedConv2d(out_sparsity=.1) |                       20.906 |                       40.743 |                       17.552 |                        6.447 |                          1.178 |
 | Base                                  |                        8.32  |                       16.273 |                        8.017 |                        1.834 |                          0.719 |
 | Naive                                 |                       46.983 |                       44.928 |                       45.732 |                       41.82  |                        146.832 |
 ### Speed multiplier vs. naive (higher is better)
@@ -69,8 +69,8 @@ The naive time is calculated by running the layer in evaluation mode with a batc
 |:--------------------------------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
 | PerturbedConv2d                       |                         2.08 |                         1.19 |                         1.7  |                         4    |                           1.75 |
 | PermutedConv2d                        |                         2.31 |                         1.11 |                         2.27 |                         6.74 |                          93.85 |
-| SparsePermutedConv2d(out_sparsity=.5) |                         2.17 |                         1.05 |                         2.4  |                         6.17 |                         120.52 |
-| SparsePermutedConv2d(out_sparsity=.1) |                         2.25 |                         1.1  |                         2.61 |                         6.49 |                         124.64 |
+| PermutedConv2d(out_sparsity=.5) |                         2.17 |                         1.05 |                         2.4  |                         6.17 |                         120.52 |
+| PermutedConv2d(out_sparsity=.1) |                         2.25 |                         1.1  |                         2.61 |                         6.49 |                         124.64 |
 | Base                                  |                         5.65 |                         2.76 |                         5.7  |                        22.8  |                         204.2  |
 | Naive                                 |                         1    |                         1    |                         1    |                         1    |                           1    |
 ### Time multiplier vs. base (lower is better)
@@ -78,8 +78,8 @@ The naive time is calculated by running the layer in evaluation mode with a batc
 |:--------------------------------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
 | PerturbedConv2d                       |                         2.72 |                         2.33 |                         3.35 |                         5.71 |                         116.66 |
 | PermutedConv2d                        |                         2.45 |                         2.5  |                         2.51 |                         3.38 |                           2.18 |
-| SparsePermutedConv2d(out_sparsity=.5) |                         2.6  |                         2.63 |                         2.37 |                         3.69 |                           1.69 |
-| SparsePermutedConv2d(out_sparsity=.1) |                         2.51 |                         2.5  |                         2.19 |                         3.52 |                           1.64 |
+| PermutedConv2d(out_sparsity=.5) |                         2.6  |                         2.63 |                         2.37 |                         3.69 |                           1.69 |
+| PermutedConv2d(out_sparsity=.1) |                         2.51 |                         2.5  |                         2.19 |                         3.52 |                           1.64 |
 | Base                                  |                         1    |                         1    |                         1    |                         1    |                           1    |
 | Naive                                 |                         5.65 |                         2.76 |                         5.7  |                        22.8  |                         204.2  |
 
