@@ -7,9 +7,10 @@ NESgpu defines the Perturbed class, which streamlines the noise sampling and wei
 
 PerturbedLinear/PerturbedConv2d is the "default" implementation which adds Gaussian noise to its weights. Large amounts of memory are needed to store the Gaussian noise.
 
-PermutedLinear/PermutedConv2d reuses a single Gaussian noise vector in a shuffled manner for all population members. It is fast and has a low memory overhead. It introduces correlation between members, but in a manner which should have no practical impact.
+SparsePerturbedLinear is a test demonstration of sparse Gaussian noise. Some basic tests on MNIST show some bad effects with extreme sparsity.
 
-SparsePerturbedLinear is a test demonstration of sparse Gaussian noise. Its performance is not much better than PermutedLinear and there are plausible scenarios in which sparse Gaussian noise performs worse than Gaussian noise.
+PermutedLinear/PermutedConv2d reuses a single Gaussian noise vector in a shuffled manner for all population members. It is fast and has a low memory overhead. It introduces correlation between members, but in a manner which should have no practical impact. It also has sparse options.
+
 
 See https://github.com/jamesal1/NESgpu/wiki/Explanation-of-Design-Decisions for further discussion of the optimizations.
 
@@ -20,56 +21,69 @@ The base time is the time for the layer to compute a forward pass in evaluation 
 
 The naive time is calculated by running the layer in evaluation mode with a batch size of 1, repeated 1024 times, to simulate the performance of an implementation that samples each batch element sequentially.
 ### Time (ms, lower is better)
-|                             |   (256, 256) |   (512, 512) |   (1024, 1024) |
-|:----------------------------|-------------:|-------------:|---------------:|
-| PerturbedLinear             |        0.863 |        3.229 |         12.252 |
-| SparsePerturbedLinear (k=1) |        0.188 |        0.396 |          0.641 |
-| SparsePerturbedLinear (k=2) |        0.226 |        0.483 |          1.041 |
-| PermutedLinear              |        0.222 |        0.348 |          0.867 |
-| Base                        |        0.051 |        0.109 |          0.306 |
-| Naive                       |       22.282 |       22.42  |         23.259 |
-
+|                                |   (256, 256) |   (512, 512) |   (1024, 1024) |
+|:-------------------------------|-------------:|-------------:|---------------:|
+| PerturbedLinear                |        0.938 |        3.231 |         12.984 |
+| SparsePerturbedLinear (k=1)    |        0.223 |        0.377 |          0.607 |
+| SparsePerturbedLinear (k=2)    |        0.302 |        0.505 |          1.097 |
+| PermutedLinear                 |        0.216 |        0.321 |          0.786 |
+| PermutedLinear(in_sparsity=.5) |        0.214 |        0.269 |          0.618 |
+| PermutedLinear(in_sparsity=.1) |        0.216 |        0.276 |          0.484 |
+| Base                           |        0.063 |        0.109 |          0.289 |
+| Naive                          |       24.484 |       23.921 |         24.065 |
 ### Speed multiplier vs. naive (higher is better)
-|                             |   (256, 256) |   (512, 512) |   (1024, 1024) |
-|:----------------------------|-------------:|-------------:|---------------:|
-| PerturbedLinear             |        25.82 |         6.94 |           1.9  |
-| SparsePerturbedLinear (k=1) |       118.45 |        56.68 |          36.28 |
-| SparsePerturbedLinear (k=2) |        98.38 |        46.42 |          22.34 |
-| PermutedLinear              |       100.28 |        64.41 |          26.82 |
-| Base                        |       434.69 |       205.32 |          75.98 |
-| Naive                       |         1    |         1    |           1    |
-
+|                                |   (256, 256) |   (512, 512) |   (1024, 1024) |
+|:-------------------------------|-------------:|-------------:|---------------:|
+| PerturbedLinear                |        26.1  |         7.4  |           1.85 |
+| SparsePerturbedLinear (k=1)    |       109.6  |        63.42 |          39.63 |
+| SparsePerturbedLinear (k=2)    |        81.18 |        47.33 |          21.94 |
+| PermutedLinear                 |       113.6  |        74.54 |          30.61 |
+| PermutedLinear(in_sparsity=.5) |       114.36 |        89.02 |          38.96 |
+| PermutedLinear(in_sparsity=.1) |       113.47 |        86.64 |          49.67 |
+| Base                           |       387.52 |       218.58 |          83.14 |
+| Naive                          |         1    |         1    |           1    |
 ### Time multiplier vs. base (lower is better)
-|                             |   (256, 256) |   (512, 512) |   (1024, 1024) |
-|:----------------------------|-------------:|-------------:|---------------:|
-| PerturbedLinear             |        16.83 |        29.57 |          40.02 |
-| SparsePerturbedLinear (k=1) |         3.67 |         3.62 |           2.09 |
-| SparsePerturbedLinear (k=2) |         4.42 |         4.42 |           3.4  |
-| PermutedLinear              |         4.33 |         3.19 |           2.83 |
-| Base                        |         1    |         1    |           1    |
-| Naive                       |       434.69 |       205.32 |          75.98 |
+|                                |   (256, 256) |   (512, 512) |   (1024, 1024) |
+|:-------------------------------|-------------:|-------------:|---------------:|
+| PerturbedLinear                |        14.85 |        29.52 |          44.86 |
+| SparsePerturbedLinear (k=1)    |         3.54 |         3.45 |           2.1  |
+| SparsePerturbedLinear (k=2)    |         4.77 |         4.62 |           3.79 |
+| PermutedLinear                 |         3.41 |         2.93 |           2.72 |
+| PermutedLinear(in_sparsity=.5) |         3.39 |         2.46 |           2.13 |
+| PermutedLinear(in_sparsity=.1) |         3.42 |         2.52 |           1.67 |
+| Base                           |         1    |         1    |           1    |
+| Naive                          |       387.52 |       218.58 |          83.14 |
+
+
 ### Time (ms, lower is better)
-|                 |   (16, 16, (3, 3), (64, 64)) |   (32, 32, (3, 3), (64, 64)) |   (64, 64, (3, 3), (32, 32)) |   (32, 32, (1, 1), (32, 32)) |   (1024, 1024, (1, 1), (1, 1)) |
-|:----------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
-| PerturbedConv2d |                       20.251 |                       33.983 |                       24.37  |                        9.73  |                         85.235 |
-| PermutedConv2d  |                       17.947 |                       35.562 |                       18.163 |                        5.604 |                          1.362 |
-| Base            |                        7.01  |                       13.805 |                        7.269 |                        1.734 |                          0.614 |
-| Naive           |                       43.68  |                       42.905 |                       42.851 |                       38.517 |                        161.733 |
+|                                       |   (16, 16, (3, 3), (64, 64)) |   (32, 32, (3, 3), (64, 64)) |   (64, 64, (3, 3), (32, 32)) |   (32, 32, (1, 1), (32, 32)) |   (1024, 1024, (1, 1), (1, 1)) |
+|:--------------------------------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
+| PerturbedConv2d                       |                       22.623 |                       37.883 |                       26.877 |                       10.466 |                         83.89  |
+| PermutedConv2d                        |                       20.37  |                       40.625 |                       20.125 |                        6.205 |                          1.565 |
+| SparsePermutedConv2d(out_sparsity=.5) |                       21.622 |                       42.852 |                       19.034 |                        6.773 |                          1.218 |
+| SparsePermutedConv2d(out_sparsity=.1) |                       20.906 |                       40.743 |                       17.552 |                        6.447 |                          1.178 |
+| Base                                  |                        8.32  |                       16.273 |                        8.017 |                        1.834 |                          0.719 |
+| Naive                                 |                       46.983 |                       44.928 |                       45.732 |                       41.82  |                        146.832 |
 ### Speed multiplier vs. naive (higher is better)
-|                 |   (16, 16, (3, 3), (64, 64)) |   (32, 32, (3, 3), (64, 64)) |   (64, 64, (3, 3), (32, 32)) |   (32, 32, (1, 1), (32, 32)) |   (1024, 1024, (1, 1), (1, 1)) |
-|:----------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
-| PerturbedConv2d |                         2.16 |                         1.26 |                         1.76 |                         3.96 |                           1.9  |
-| PermutedConv2d  |                         2.43 |                         1.21 |                         2.36 |                         6.87 |                         118.78 |
-| Base            |                         6.23 |                         3.11 |                         5.9  |                        22.21 |                         263.24 |
-| Naive           |                         1    |                         1    |                         1    |                         1    |                           1    |
-
+|                                       |   (16, 16, (3, 3), (64, 64)) |   (32, 32, (3, 3), (64, 64)) |   (64, 64, (3, 3), (32, 32)) |   (32, 32, (1, 1), (32, 32)) |   (1024, 1024, (1, 1), (1, 1)) |
+|:--------------------------------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
+| PerturbedConv2d                       |                         2.08 |                         1.19 |                         1.7  |                         4    |                           1.75 |
+| PermutedConv2d                        |                         2.31 |                         1.11 |                         2.27 |                         6.74 |                          93.85 |
+| SparsePermutedConv2d(out_sparsity=.5) |                         2.17 |                         1.05 |                         2.4  |                         6.17 |                         120.52 |
+| SparsePermutedConv2d(out_sparsity=.1) |                         2.25 |                         1.1  |                         2.61 |                         6.49 |                         124.64 |
+| Base                                  |                         5.65 |                         2.76 |                         5.7  |                        22.8  |                         204.2  |
+| Naive                                 |                         1    |                         1    |                         1    |                         1    |                           1    |
 ### Time multiplier vs. base (lower is better)
-|                 |   (16, 16, (3, 3), (64, 64)) |   (32, 32, (3, 3), (64, 64)) |   (64, 64, (3, 3), (32, 32)) |   (32, 32, (1, 1), (32, 32)) |   (1024, 1024, (1, 1), (1, 1)) |
-|:----------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
-| PerturbedConv2d |                         2.89 |                         2.46 |                         3.35 |                         5.61 |                         138.73 |
-| PermutedConv2d  |                         2.56 |                         2.58 |                         2.5  |                         3.23 |                           2.22 |
-| Base            |                         1    |                         1    |                         1    |                         1    |                           1    |
-| Naive           |                         6.23 |                         3.11 |                         5.9  |                        22.21 |                         263.24 |
+|                                       |   (16, 16, (3, 3), (64, 64)) |   (32, 32, (3, 3), (64, 64)) |   (64, 64, (3, 3), (32, 32)) |   (32, 32, (1, 1), (32, 32)) |   (1024, 1024, (1, 1), (1, 1)) |
+|:--------------------------------------|-----------------------------:|-----------------------------:|-----------------------------:|-----------------------------:|-------------------------------:|
+| PerturbedConv2d                       |                         2.72 |                         2.33 |                         3.35 |                         5.71 |                         116.66 |
+| PermutedConv2d                        |                         2.45 |                         2.5  |                         2.51 |                         3.38 |                           2.18 |
+| SparsePermutedConv2d(out_sparsity=.5) |                         2.6  |                         2.63 |                         2.37 |                         3.69 |                           1.69 |
+| SparsePermutedConv2d(out_sparsity=.1) |                         2.51 |                         2.5  |                         2.19 |                         3.52 |                           1.64 |
+| Base                                  |                         1    |                         1    |                         1    |                         1    |                           1    |
+| Naive                                 |                         5.65 |                         2.76 |                         5.7  |                        22.8  |                         204.2  |
+
+
 
 To summarize, there are huge gains for dense layers. For certain convolutional layers that are already highly parallel, there are only modest gains versus the naive implementation.
 
