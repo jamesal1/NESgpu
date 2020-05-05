@@ -179,7 +179,7 @@ def time_forward_median(layer, input, times, repeat=1):
 
 def test_linear(device="cuda", batch_size=1024, times=100):
     ret = defaultdict(lambda:dict())
-    for test in [(16, 16), (256, 256), (512, 512), (1024, 1024)]:
+    for test in [(256, 256), (512, 512), (1024, 1024)]:
         output_dim, input_dim = test
         l = PerturbedLinear(input_dim, output_dim, batch_size).to(device)
         s1 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=1).to(device)
@@ -187,13 +187,16 @@ def test_linear(device="cuda", batch_size=1024, times=100):
         plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device)
         pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device)
         plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
-        splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.25).to(device)
-        spli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.25).to(device)
+        splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.99).to(device)
+        spli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.5).to(device)
+        spli2 = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1).to(device)
         splb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device)
         for layer, name in [(l, "PerturbedLinear"),
                             (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"),
-                            (plo, "PermutedLinear(out)"), (pli, "PermutedLinear(in)"), (plb, "PermutedLinear(both)"),
-                            (splo, "SparsePermutedLinear(out)"), (spli, "SparsePermutedLinear(in)"), (splb, "SparsePermutedLinear(both)")]:
+                            (pli, "PermutedLinear"),
+                            (spli, "PermutedLinear(in_sparsity=.5)"),
+                            (spli2, "PermutedLinear(in_sparsity=.1)")
+                            ]:
             layer.allocate_memory()
             layer.set_noise_scale(1.)
             layer.set_seed()
@@ -203,17 +206,12 @@ def test_linear(device="cuda", batch_size=1024, times=100):
 
             inp = torch.rand(batch_size, input_dim, device=device)
             ret[str(test)][name] = time_forward_median(layer, inp, times)
-            print(name)
-            try:
-                layer.set_grad(torch.rand(batch_size, device=device))
-            except NotImplementedError:
-                print("Error")
         l.perturbed_flag = False
         ret[str(test)]["Base"] = time_forward_median(l, inp, times)
         ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
     return ret
 
-def test_conv(device="cuda", batch_size=1024, times=10):
+def test_conv(device="cuda", batch_size=1024, times=100):
     ret = defaultdict(lambda:dict())
     for test in \
             [(16, 16, (3, 3), (64, 64)),
@@ -226,12 +224,23 @@ def test_conv(device="cuda", batch_size=1024, times=10):
         plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out").to(device)
         pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in").to(device)
         plb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both").to(device)
-        for layer, name in [(l, "PerturbedConv2d"), (plo, "PermutedLinear(out)"), (pli, "PermutedLinear(in)"), (plb, "PermutedLinear(both)"),]:
+        splo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.5).to(device)
+        splo2 = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.1).to(device)
+        splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device)
+        for layer, name in [(l, "PerturbedConv2d"), (plo, "PermutedConv2d"),
+                             (splo, "PermutedConv2d(out_sparsity=.5)"),
+                             (splo2, "PermutedConv2d(out_sparsity=.1)")
+                            ]:
             layer.set_noise(1.)
             layer.perturbed_flag = True
             inp = torch.rand(batch_size, input_dim, *image_size, device=device)
+            print(name)
             ret[str(test)][name] = time_forward_median(layer, inp, times)
-            layer.set_grad(torch.rand(batch_size, device=device))
+            try:
+                print(layer.in_sparsity)
+
+            except:
+                pass
         l.perturbed_flag = False
         ret[str(test)]["Base"] = time_forward_median(l, inp, times)
         ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
@@ -273,7 +282,7 @@ if __name__ == "__main__":
         # sparse_test("cuda")
         # test_perm_conv("cuda")
         # to_markdown(test_linear("cuda"))
-        # to_markdown(test_linear("cuda"))
+        to_markdown(test_linear("cuda"))
         to_markdown(test_conv("cuda"))
         # test_linear("cuda")
         # test_add("cuda")

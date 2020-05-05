@@ -126,11 +126,11 @@ class Trainer():
 
 
 if __name__ == "__main__":
-    batch_size = 2 ** 12
-    directions = 2 ** 12
+    batch_size = 2 ** 10
+    directions = 2 ** 10
 
-    my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
-    # my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
+    # my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
+    my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
     # Trainer(model.TransformerNet()).train()
     if cuda_on:
         my_model = my_model.cuda()

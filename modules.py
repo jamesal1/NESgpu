@@ -145,7 +145,17 @@ class Permuted(Perturbed):
         self.output_permutations = None
 
     def set_noise(self, noise_scale=None):
-        Perturbed.set_noise(self, noise_scale)
+        if self.seed is None:
+            self.set_seed()
+        if noise_scale is not None:
+            self.set_noise_scale(noise_scale)
+        if self.weight_noise is None:
+            self.allocate_memory()
+        gen = torch.cuda.manual_seed(self.seed)
+        rescale = (self.out_degree * self.in_degree / self.out_sparsity / self.in_sparsity) **.5
+        self.weight_noise.normal_(std=self.noise_scale * rescale, generator=gen)
+        if self.bias is not None:
+            self.bias_noise.normal_(std=self.noise_scale, generator=gen)
         gen = torch.manual_seed(self.seed)
         if self.permute_outputs:
             self.output_permutations = torch.empty(self.directions, self.out_degree, dtype=torch.long)
@@ -303,7 +313,7 @@ class PermutedLinear(nn.Linear, Permuted):
             permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity)
             if self.out_sparsity < self.out_degree:
                 perturbations = torch.zeros_like(unperturbed)
-                torch.mm(permuted_input, self.weight_noise.t(),out=perturbations.view(-1,self.out_features)[:self.out_sparsity])
+                torch.mm(permuted_input, self.weight_noise.t(),out=perturbations.view(-1,self.out_features)[:, :self.out_sparsity])
                 perturbations = perturbations.view(repeat_size,
                                                           self.directions * self.out_features)
             else:
@@ -337,9 +347,6 @@ class PermutedConv2d(nn.Conv2d, Permuted):
         nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, padding_mode)
         Permuted.__init__(self, in_channels, out_channels, directions, bias=bias,
                           permutation=permutation, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
-        if in_sparsity or out_sparsity:
-            print("Sparse mode not implemented for conv")
-            raise NotImplementedError
 
     def forward(self, input):
         if self.padding_mode != 'zeros':
@@ -351,11 +358,25 @@ class PermutedConv2d(nn.Conv2d, Permuted):
                                padding, self.dilation, self.groups)
 
         if self.perturbed_flag:
-            input_view = input.view(-1, self.directions * self.in_channels, *input.shape[-2:])
+            input_dims = input.shape[-2:]
+            output_dims = unperturbed.shape[-2:]
+            input_view = input.view(-1, self.directions * self.in_channels, *input_dims)
             repeat_size = input_view.size(0)
-            permuted_input = self.apply_input_permutation(input_view).view_as(input)
-            perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
-                                     padding, self.dilation, self.groups)
+
+            permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity, *input_dims)
+            if self.out_sparsity < self.out_degree:
+                perturbations = torch.zeros_like(unperturbed)
+                perturbations.view(-1, self.out_channels, *output_dims)[:, :self.out_sparsity] = \
+                    F.conv2d(permuted_input, self.weight_noise, None, self.stride, padding, self.dilation, self.groups)
+            else:
+                perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
+                                         padding, self.dilation, self.groups)
+
+
+            # permuted_input = self.apply_input_permutation(input_view).view_as(input)
+            # print(input.shape,permuted_input.shape,input_view.shape)
+            # perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
+            #                          padding, self.dilation, self.groups)
             permuted_output = self.apply_output_permutation(perturbations.view(repeat_size, self.directions * self.out_channels,
                                                                      *perturbations.shape[-2:])).view_as(unperturbed)
             if self.bias is not None:
@@ -371,10 +392,10 @@ class PermutedConv2d(nn.Conv2d, Permuted):
             sp_size = self.out_sparsity * self.in_sparsity
             self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(sp_size, -1)).view_as(self.weight)
         elif self.permute_inputs:
-            self.weight.grad = torch.mm(self.weight_noise.permute([0,2,3,1]).contiguous().view(-1,self.in_channels),
+            self.weight.grad = torch.mm(self.weight_noise.permute([0,2,3,1]).contiguous().view(-1,self.in_sparsity),
                                         permutation_weights).view(self.out_channels, *self.kernel_size,self.in_channels).permute([0,3,1,2])
         else:
-            self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(self.out_channels,-1)).view_as(self.weight)
+            self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(self.out_sparsity,-1)).view_as(self.weight)
         if self.bias is not None:
             self.bias.grad = weights @ self.bias_noise
 

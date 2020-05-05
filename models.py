@@ -57,20 +57,27 @@ class MNISTConvNet(nn.Module):
     def __init__(self, directions, action_size, in_channels=1):
         super(MNISTConvNet,self).__init__()
         filters = filters_mnist
-        permutation="both"
+        kwargs = {"permutation": "both", "in_sparsity": .01, "out_sparsity": .01}
+        kwargs = {"permutation": "out", "out_sparsity": .5}
+        # kwargs = {"permutation": "in", "in_sparsity": .5}
+        layertype=modules.PermutedConv2d
+
+        # kwargs = {}
+        # layertype = modules.PerturbedConv2d
+
         layers = []
         for out_channels, kernel_size, stride in filters[:-1]:
             padding = math.ceil((kernel_size[0]-1)/2)
-            layers += [modules.PermutedConv2d( in_channels, out_channels, kernel_size, directions, stride=stride,
-                                               padding=padding, permutation=permutation)]
-            layers += [nn.T()]
+            layers += [layertype(in_channels, out_channels, kernel_size, directions, stride=stride,
+                                               padding=padding, **kwargs)]
+            layers += [nn.Tanh()]
             in_channels = out_channels
 
         out_channels, kernel_size, stride = filters[-1]
 
-        layers += [modules.PermutedConv2d(in_channels, out_channels, kernel_size, directions, stride, padding=0, permutation=permutation)]
-        layers += [nn.ELU()]
-        layers += [modules.PermutedConv2d(out_channels, action_size, [1,1], directions, stride, padding=0, permutation=permutation)]
+        layers += [layertype(in_channels, out_channels, kernel_size, directions, stride, padding=0, **kwargs)]
+        layers += [nn.Tanh()]
+        layers += [layertype(out_channels, action_size, [1,1], directions, stride, padding=0, **kwargs)]
         self.layers = nn.Sequential(*layers)
 
 
@@ -104,12 +111,19 @@ class MNISTDenseNet(nn.Module):
         super(MNISTDenseNet,self).__init__()
         layertype=modules.PermutedLinear
         layers = []
+        # kwargs = {"permutation": "both", "in_sparsity": .1, "out_sparsity": .1}
+        # kwargs = {"permutation": "out", "out_sparsity": .1}
+        kwargs = {"permutation": "in", "in_sparsity": .1}
+
+        # layertype=modules.PerturbedLinear
+        # kwargs = {}
+
         for i in range(3):
-            layers += [layertype(784, 784,directions)]
+            layers += [layertype(784, 784, directions, **kwargs)]
             layers += [nn.ELU()]
 
 
-        layers += [layertype(784, action_size,directions)]
+        layers += [layertype(784, action_size,directions, **kwargs)]
         self.layers = nn.Sequential(*layers)
 
 
