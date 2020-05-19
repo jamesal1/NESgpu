@@ -152,7 +152,7 @@ class Permuted(Perturbed):
         if self.weight_noise is None:
             self.allocate_memory()
         gen = torch.cuda.manual_seed(self.seed)
-        rescale = (self.out_degree * self.in_degree / self.out_sparsity / self.in_sparsity) **.5
+        rescale = (self.out_degree * self.in_degree / self.out_sparsity / self.in_sparsity) ** .5
         self.weight_noise.normal_(std=self.noise_scale * rescale, generator=gen)
         if self.bias is not None:
             self.bias_noise.normal_(std=self.noise_scale, generator=gen)

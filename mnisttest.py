@@ -1,5 +1,5 @@
 from torchvision import datasets, transforms
-import models
+import mnistmodels as models
 import modules
 
 
