@@ -17,7 +17,7 @@ See https://github.com/jamesal1/NESgpu/wiki/Explanation-of-Design-Decisions for 
 ## Forward Pass Performance
 Experiments were done on a GeForce 1080 Ti, with a batch size of 1024. The reported times are the median time of a 100 runs. The format for the column headers are (out dimension, in dimension) for the dense layers and (out_channels, in channels, filter_size, input_size) for the convolutional layers. 
 
-The base time is the time for the layer to compute a forward pass in evaluation mode; it represents an upper bound on the performance of the layer in training mode.
+The base time is the time for the layer to compute a forward pass in inference mode; it represents an upper bound on the performance of the layer in training mode.
 
 The naive time is calculated by running the layer in evaluation mode with a batch size of 1, repeated 1024 times, to simulate the performance of an implementation that samples each batch element sequentially.
 ### Time (ms, lower is better)
@@ -92,7 +92,7 @@ All classes/layers can be found in modules.py.
 
 1. Replace the paramaterized layers in the base model with perturbed versions (i.e. Linear -> PerturbedLinear), passing in the population size using the directions parameter. PermutedLinear and PermutedConv2d are the most recommended to use, as they are fast and don't use large amounts of memory.
 
-2. Create the wrapper as perturbed_model = PerturbedModel(base_model, directions). To run in evaluation mode, call base_model.my_function(). To run in training mode, call perturbed_model.my_function(), which will set the layers to training mode and then call base_model.my_function().
+2. Create the wrapper as perturbed_model = PerturbedModel(base_model, directions). To run in inference mode, call base_model.any_function(). To run in training mode, call perturbed_model.any_function(), which will set the layers to training mode and then call base_model.any_function().
 
 3. For each training iteration:
 
