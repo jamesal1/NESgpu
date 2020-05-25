@@ -1,7 +1,6 @@
-import modules
+from modules import base, binary
 import torch
 from torch import nn
-import torch.nn.functional as F
 import math
 
 filters_mnist = [
@@ -19,7 +18,7 @@ class MNISTConvNet(nn.Module):
         kwargs = {"permutation": "both", "in_sparsity": .01, "out_sparsity": .01}
         kwargs = {"permutation": "out", "out_sparsity": .5}
         # kwargs = {"permutation": "in", "in_sparsity": .5}
-        layertype=modules.PermutedConv2d
+        layertype= base.PermutedConv2d
 
         # kwargs = {}
         # layertype = modules.PerturbedConv2d
@@ -49,7 +48,7 @@ class MNISTDenseNet(nn.Module):
 
     def __init__(self, directions, action_size, in_channels=1):
         super(MNISTDenseNet,self).__init__()
-        layertype=modules.PermutedLinear
+        layertype= base.PermutedLinear
         layers = []
         # kwargs = {"permutation": "both", "in_sparsity": .1, "out_sparsity": .1}
         # kwargs = {"permutation": "out", "out_sparsity": .1}
@@ -70,3 +69,17 @@ class MNISTDenseNet(nn.Module):
     def forward(self, input):
         return torch.log_softmax(self.layers.forward(input.reshape(-1,784)).squeeze(),dim=1)
 
+
+class MNISTBinaryDenseNet(nn.Module):
+
+    def __init__(self, directions, action_size, in_channels=1):
+        super(MNISTBinaryDenseNet,self).__init__()
+        layers = []
+        layers += [binary.BinarizedLinear(784, 784 * 8, directions, dtype=torch.int8)]
+        for i in range(2):
+            layers += [binary.BinarizedLinear(784, 784, directions)]
+        layers += [binary.BinarizedLinear(784, action_size, directions)]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, input):
+        return torch.log_softmax(self.layers.forward(input.view(-1, 784)).float(), dim=1)

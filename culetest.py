@@ -1,7 +1,6 @@
 from torchcule.atari import Env
-import models
-import modules
-
+from models import models
+from modules import base
 
 from tqdm import trange
 import os
@@ -57,7 +56,7 @@ class Trainer():
         self.model.batch_size=self.batch_size
         if half_precision:
             self.model = self.model.half()
-        perturbed_model = modules.PerturbedModel(self.model, self.directions)
+        perturbed_model = base.PerturbedModel(self.model, self.directions)
         ave_delta = .005 * self.batch_size
         # opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
         opt = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
@@ -132,7 +131,7 @@ if __name__ == "__main__":
     colors = 1 if color_mode == "gray" else 3
     env = Env(game, batch_size, color_mode, torch.device("cuda",0), True)
     print(env.action_space)
-    my_model = models.ConvNet(directions=directions, action_size=6,in_channels=colors)
+    my_model = models.ConvNet(directions=directions, action_size=6, in_channels=colors)
     # Trainer(model.TransformerNet()).train()
     if cuda_on:
         my_model = my_model.cuda()

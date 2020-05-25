@@ -1,4 +1,4 @@
-from modules import *
+from modules.base import *
 from collections import defaultdict
 
 def lin_vs_conv(device="cpu"):

@@ -1,7 +1,6 @@
-import modules
+from modules import base
 import torch
 from torch import nn
-import torch.nn.functional as F
 import math
 filters_84x84 = [
     [16, [8, 8], 4],
@@ -26,18 +25,18 @@ class ConvNet(nn.Module):
         layers = []
         for out_channels, kernel_size, stride in filters[:-1]:
             padding = math.ceil((kernel_size[0]-1)/2)
-            layers += [modules.PermutedConv2d( in_channels, out_channels, kernel_size, directions, stride=stride,
-                                    padding=padding, permutation=permutation)]
+            layers += [base.PermutedConv2d(in_channels, out_channels, kernel_size, directions, stride=stride,
+                                           padding=padding, permutation=permutation)]
             layers += [activation()]
             layers += [nn.BatchNorm2d(out_channels)]
             in_channels = out_channels
 
         out_channels, kernel_size, stride = filters[-1]
 
-        layers += [modules.PermutedConv2d(in_channels, out_channels, kernel_size, directions, stride, padding=0, permutation=permutation)]
+        layers += [base.PermutedConv2d(in_channels, out_channels, kernel_size, directions, stride, padding=0, permutation=permutation)]
         layers += [activation()]
         layers += [nn.BatchNorm2d(out_channels)]
-        layers += [modules.PermutedConv2d(out_channels, action_size, [1,1], directions, stride, padding=0, permutation=permutation)]
+        layers += [base.PermutedConv2d(out_channels, action_size, [1, 1], directions, stride, padding=0, permutation=permutation)]
         self.layers = nn.Sequential(*layers)
 
 
@@ -52,7 +51,7 @@ class DenseNet(nn.Module):
 
     def __init__(self, directions, action_size, in_channels=128,  big=True):
         super(DenseNet,self).__init__()
-        layertype=modules.PerturbedLinear
+        layertype= base.PerturbedLinear
         layers = []
         for i in range(3):
             layers += [layertype(128, 128,directions)]

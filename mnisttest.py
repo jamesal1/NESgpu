@@ -1,12 +1,7 @@
 from torchvision import datasets, transforms
-import mnistmodels as models
-import modules
+from models import mnistmodels as models
+from modules import base
 
-
-
-
-
-from tqdm import trange
 import os
 import datetime
 import shutil
@@ -14,7 +9,6 @@ import torch
 import random
 random.seed(2)
 torch.manual_seed(2)
-import time
 half_precision = False
 cuda_on = True
 if cuda_on:
@@ -37,9 +31,12 @@ class Trainer():
             os.makedirs(self.log_dir)
         if not os.path.exists(self.checkpoints_dir):
             os.makedirs(self.checkpoints_dir)
-        for f in ["mnisttest.py", "models.py"]:
+        for f in ["mnisttest.py", "models/mnistmodels.py"]:
             src = os.path.join(os.getcwd(), f)
             dst = os.path.join(self.log_dir, f)
+            folder = "/".join(dst.split("/")[:-1])
+            if not os.path.exists(folder):
+                os.makedirs(folder)
             shutil.copyfile(src, dst)
         self.model = my_model
         self.noise_scale = kwargs.get("noise_scale", 3e-3)
@@ -59,16 +56,23 @@ class Trainer():
         self.model.batch_size=self.batch_size
         if half_precision:
             self.model = self.model.half()
-        perturbed_model = modules.PerturbedModel(self.model,self.directions)
+        perturbed_model = base.PerturbedModel(self.model, self.directions)
         ave_delta = .005 * self.batch_size
         opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
         # opt = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
+        # train_loader = torch.utils.data.DataLoader(
+        #     datasets.MNIST('../data', train=True, download=True,
+        #                    transform=transforms.Compose([
+        #                        transforms.ToTensor(),
+        #                        transforms.Normalize((0.1307,), (0.3081,))
+        #                    ])),
+        #     drop_last = True,
+        #     batch_size=self.batch_size, shuffle=True)
         train_loader = torch.utils.data.DataLoader(
             datasets.MNIST('../data', train=True, download=True,
                            transform=transforms.Compose([
                                transforms.ToTensor(),
-                               transforms.Normalize((0.1307,), (0.3081,))
                            ])),
             drop_last = True,
             batch_size=self.batch_size, shuffle=True)
@@ -90,6 +94,7 @@ class Trainer():
 
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.cuda()
+                data = (data * 255).type(torch.int8)
                 target = target.cuda()
                 with torch.no_grad():
                     perturbed_model.set_seed()
@@ -126,11 +131,12 @@ class Trainer():
 
 
 if __name__ == "__main__":
-    batch_size = 2 ** 10
-    directions = 2 ** 10
+    batch_size = 2 ** 9
+    directions = 2 ** 9
 
     # my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
-    my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
+    # my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
+    my_model = models.MNISTBinaryDenseNet(directions=directions, action_size=10,in_channels=1)
     # Trainer(model.TransformerNet()).train()
     if cuda_on:
         my_model = my_model.cuda()

@@ -1,4 +1,4 @@
-from modulesBinary import *
+from modules.binary import *
 import time
 import torch
 
