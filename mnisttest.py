@@ -42,7 +42,7 @@ class Trainer():
         self.noise_scale = kwargs.get("noise_scale", 3e-3)
         # self.noise_scale_decay = 1 - kwargs.get("noise_scale_decay", 1e-3)
         self.noise_scale_decay = 1 - kwargs.get("noise_scale_decay", 0)
-        self.lr = kwargs.get("lr", 3e-3)
+        self.lr = kwargs.get("lr", 1e0)
         self.weight_decay = kwargs.get("weight_decay",0)
         # self.lr_decay = kwargs.get("lr_decay", 1e-2)
         self.ave_delta_rate = kwargs.get("ave_delta_rate", .99)
@@ -101,7 +101,8 @@ class Trainer():
                     perturbed_model.set_noise_scale(self.noise_scale)
                     perturbed_model.allocate_memory()
                     perturbed_model.set_noise()
-                    reward = torch.nn.NLLLoss(reduce=False)(perturbed_model.forward(data),target)
+                    pred = perturbed_model.forward(data)
+                    reward = torch.nn.NLLLoss(reduce=False)(pred,target)
                     result = reward - reward.mean()
                     # step_size = result / ((ave_delta + 1e-5) * self.noise_scale)
                     step_size = result
@@ -116,7 +117,7 @@ class Trainer():
                 #         print(param.grad.abs().mean())
                 self.noise_scale *= self.noise_scale_decay
                 opt.step()
-                print(torch.nn.NLLLoss()(self.model.forward(data),target))
+                # print(torch.nn.NLLLoss()(self.model.forward(data),target))
             # for param in self.model.parameters():
             #
             #     print(param.data.abs().mean())
@@ -131,8 +132,8 @@ class Trainer():
 
 
 if __name__ == "__main__":
-    batch_size = 2 ** 9
-    directions = 2 ** 9
+    batch_size = 2 ** 8
+    directions = 2 ** 8
 
     # my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
     # my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)

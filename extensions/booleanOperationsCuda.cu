@@ -7,21 +7,11 @@
 #include <cuda_fp16.h>
 
 
-//can't use __clz
-int next_pow2(int v) {
-    v--;
-    v |= v >> 1;
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-    v++;
-    return v;
-}
 
-int next_pow2to1024(int v) {
-    if (v>512)
-        return 1024;
+//can't use __clz
+int next_pow2_clip(int v, int cap) {
+    if (v > cap / 2)
+        return cap;
     v--;
     v |= v >> 1;
     v |= v >> 2;
@@ -116,6 +106,43 @@ __global__ void cuda_binary_bmm_kernel(torch::PackedTensorAccessor32<int32_t,3,t
     }
 }
 
+//order of channels for input/output is N H W C and order of filter is N O H W C
+template <typename scalar_t>
+__global__ void cuda_binary_batch_conv2d_kernel(torch::PackedTensorAccessor32<int32_t,4,torch::RestrictPtrTraits> output,
+                               torch::PackedTensorAccessor32<scalar_t,4,torch::RestrictPtrTraits> input,
+                               torch::PackedTensorAccessor32<scalar_t,5,torch::RestrictPtrTraits> filter,
+                               int padx, int pady,
+                               int stridex, int stridey) {
+        const int idx_xy = blockIdx.y * blockDim.y + threadIdx.y;
+        const int idx_bc = blockIdx.x * blockDim.x + threadIdx.x;
+        const int x_out = idx_xy / output.size(2);
+        const int y_out = idx_xy - x_out * output.size(2);
+        const int batch = idx_bc / output.size(3);
+        const int ch_out = idx_bc - batch * output.size(3);
+//        const int idx_xyc = blockIdx.y * blockDim.y + threadIdx.y;
+//        const int batch = blockIdx.x * blockDim.x + threadIdx.x;
+//        const int idx_xy = idx_xyc / output.size(3);
+//        const int x_out = idx_xy / output.size(2);
+//        const int y_out = idx_xy - x_out * output.size(2);
+//        const int ch_out = idx_xyc - idx_xy * output.size(3);
+        if (batch < output.size(0) && x_out < output.size(1) && y_out < output.size(2) && ch_out < output.size(3)) {
+            int tmp = 0;
+            for (int ch_in = 0; ch_in < input.size(3); ch_in++) {
+                for (int i = 0; i < filter.size(2); i++) {
+                    for (int j = 0; j < filter.size(3); j++) {
+                        int x_in = i + x_out * stridex - padx;
+                        int y_in = j + y_out * stridey - pady;
+                        scalar_t inp = (x_in >= 0 && x_in < input.size(1) && y_in >= 0 && y_in < input.size(2)) ?
+                            input[batch][x_in][y_in][ch_in] : 0;
+                        tmp += __popcll(filter[batch][ch_out][i][j][ch_in] ^ inp);
+                    }
+                }
+            }
+            output[batch][x_out][y_out][ch_out] = tmp;
+        }
+
+}
+
 template <typename scalar_t>
 __global__ void cuda_binary_seeded_bmv_kernel(torch::PackedTensorAccessor32<int32_t,2,torch::RestrictPtrTraits> C,
                                torch::PackedTensorAccessor32<torch::Half,2,torch::RestrictPtrTraits> A,
@@ -205,9 +232,9 @@ __global__ void cuda_binary_weighted_sum_kernel(torch::PackedTensorAccessor32<to
 
 torch::Tensor cuda_pack8(torch::Tensor input) {
     const int ret_size1 = (input.size(1) + 7) / 8;
-    const int threadsy = ret_size1 > 512 ? 1024 : next_pow2(ret_size1);
+    const int threadsy = next_pow2_clip(ret_size1, 1024);
     const dim3 threads(1024 / threadsy, threadsy);
-    const dim3 blocks((input.size(0) + threads.x - 1)/threads.x, ret_size1 / threadsy);
+    const dim3 blocks(ceil_div(input.size(0), threads.x), ceil_div(ret_size1, threadsy));
     auto ret = torch::zeros({input.size(0), ret_size1}, torch::TensorOptions().dtype(torch::kInt8).device(input.device()));
     cuda_pack8_kernel<<<blocks,threads>>>(
         ret.packed_accessor32<int8_t,2,torch::RestrictPtrTraits>(),
@@ -221,9 +248,9 @@ torch::Tensor cuda_pack8(torch::Tensor input) {
 torch::Tensor cuda_pack(torch::Tensor input, torch::Dtype dtype) {
     const int bitsize = 8 * elementSize(dtype);
     const int ret_size1 = (input.size(1) + bitsize - 1) / bitsize;
-    const int threadsy = ret_size1 > 512 ? 1024 : next_pow2(ret_size1);
+    const int threadsy = next_pow2_clip(ret_size1, 1024);
     const dim3 threads(1024 / threadsy, threadsy);
-    const dim3 blocks((input.size(0) + threads.x - 1)/threads.x, ret_size1 / threadsy);
+    const dim3 blocks(ceil_div(input.size(0), threads.x), ceil_div(ret_size1, threadsy));
     auto ret = torch::zeros({input.size(0), ret_size1}, torch::TensorOptions().dtype(dtype).device(input.device()));
     AT_DISPATCH_INTEGRAL_TYPES(ret.scalar_type(), "pack_cuda", ([&] {
         cuda_pack_kernel<<<blocks,threads>>>(
@@ -252,18 +279,13 @@ torch::Tensor cuda_unpack(torch::Tensor input) {
     return ret;
 }
 
+// thread config assumes B.size(2) = 1
 torch::Tensor cuda_binary_bmm(torch::Tensor A, torch::Tensor B) {
     auto C = torch::zeros({A.size(0), A.size(1), B.size(2)}, torch::TensorOptions().dtype(torch::kInt32).device(A.device()));
-     dim3 threads;
-    if (C.size(1) == 1) { //improve later
-        threads = dim3(1, 1, 1024);
-    } else if (C.size(2) == 1) {
-        threads = dim3(1, 1024, 1);
-    } else {
-        threads = dim3(1, 32, 32);
-    }
-    //threads=dim3(1024);
-    const dim3 blocks((C.size(0) + threads.x - 1) / threads.x, (C.size(1) + threads.y - 1) / threads.y, (C.size(2) + threads.z - 1) / threads.z);
+    const int threadsy = next_pow2_clip(A.size(1), 1024);
+    const int threadsx = next_pow2_clip(A.size(0), 1024 / threadsy);
+    const dim3 threads(threadsx, threadsy);
+    const dim3 blocks(ceil_div(C.size(0), threads.x) , ceil_div(C.size(1), threads.y), ceil_div(C.size(2), threads.z));
     AT_DISPATCH_INTEGRAL_TYPES(A.scalar_type(), "binary_bmm_cuda", ([&] {
             cuda_binary_bmm_kernel<<<blocks,threads>>>(
                         C.packed_accessor32<int32_t,3,torch::RestrictPtrTraits>(),
@@ -275,12 +297,46 @@ torch::Tensor cuda_binary_bmm(torch::Tensor A, torch::Tensor B) {
     return C;
 }
 
+torch::Tensor cuda_binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey) {
+    const int h = (input.size(1) - filter.size(2) + 2 * padx) / stridex + 1;
+    const int w = (input.size(2) - filter.size(3) + 2 * pady) / stridey + 1;
+    auto output = torch::zeros({filter.size(0), h, w, filter.size(1)}, torch::TensorOptions().dtype(torch::kInt32).device(input.device()));
+    const int hw = h * w;
+    const int bo = filter.size(0) * filter.size(1);
+    const int threadsy = next_pow2_clip(hw, 1024);
+    const int threadsx = next_pow2_clip(bo, 1024 / threadsy);
+    const int threadsy = next_pow2_clip(hw, 1024);
+    const int threadsx = next_pow2_clip(bo, 1024 / threadsy);
+    const dim3 threads(threadsx, threadsy);
+    const dim3 blocks(ceil_div(bo, threads.x) , ceil_div(hw, threads.y));
+//    const int hwo = h * w * filter.size(1);
+//    const int threadsy = next_pow2_clip(hwo, 1024);
+//    const int threadsx = next_pow2_clip(filter.size(0), 1024 / threadsy);
+//    const dim3 threads(threadsx, threadsy);
+//    const dim3 blocks(ceil_div(filter.size(0), threads.x) , ceil_div(hwo, threads.y));
+        AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "binary_batch_conv2d_cuda", ([&] {
+                cuda_binary_batch_conv2d_kernel<<<blocks,threads>>>(output.packed_accessor32<int32_t,4,torch::RestrictPtrTraits>(),
+                                               input.packed_accessor32<scalar_t,4,torch::RestrictPtrTraits>(),
+                                               filter.packed_accessor32<scalar_t,5,torch::RestrictPtrTraits>(),
+                                               padx, pady, stridex, stridey);
+
+
+
+            }));
+        return output;
+}
+
+
 torch::Tensor cuda_binary_seeded_bmv(torch::Tensor A, torch::Tensor B, unsigned long seed) {
     const int bitsize = 8 * elementSize(B.scalar_type());
     auto C = torch::zeros({B.size(0), A.size(0)}, torch::TensorOptions().dtype(torch::kInt32).device(A.device()));
-    //dim3 threads(1,1024);
-    dim3 threads(1024);
-    const dim3 blocks((C.size(0) + threads.x - 1) / threads.x, (C.size(1) + threads.y - 1) / threads.y);
+    //const int threadsy = next_pow2_clip(A.size(1), 1024);
+    //const int threadsx = next_pow2_clip(A.size(0), 1024 / threadsy);
+    const int threadsx = next_pow2_clip(A.size(0), 1024);
+    const int threadsy = next_pow2_clip(A.size(1), 1024 / threadsx);
+    const dim3 threads(threadsx, threadsy);
+    const dim3 blocks(ceil_div(C.size(0), threads.x) , ceil_div(C.size(1), threads.y));
+
     AT_DISPATCH_INTEGRAL_TYPES(B.scalar_type(), "binary_seeded_mm_cuda", ([&] {
             cuda_binary_seeded_bmv_kernel<<<blocks,threads>>>(
                     C.packed_accessor32<int32_t,2,torch::RestrictPtrTraits>(),
@@ -299,19 +355,16 @@ torch::Tensor cuda_sample_bits(torch::Tensor p, int n, torch::Dtype dtype, unsig
     const int bitsize = 8 * elementSize(dtype);
     const int ret_size2 = ceil_div(p.size(1), bitsize);
     auto ret = torch::zeros({n, p.size(0), ret_size2}, torch::TensorOptions().dtype(dtype).device(p.device()));
-    const int threads2 = next_pow2to1024(ret_size2);
-    int threads0 = next_pow2(n);
-        if (1024 / threads2 < threads0) {
-            threads0 = 1024 / threads2;
-        }
+    const int threads2 = next_pow2_clip(ret_size2, 1024);
+    const int threads0 = next_pow2_clip(n, 1024 / threads2);
     int threads1 = 1024 / threads0 / threads2;
     if (threads1 > 64) {
         threads1 = 64;
     }
     const dim3 threads(threads0, threads2, threads1);
     const dim3 blocks(ceil_div(n, threads.x), ceil_div(ret_size2, threads.y), ceil_div(ret.size(1), threads.z));
-    printf("%d %d %d\n",threads.x, threads.y, threads.z);
-    printf("%d %d %d\n",blocks.x, blocks.y, blocks.z);
+    //printf("%d %d %d\n",threads.x, threads.y, threads.z);
+    //printf("%d %d %d\n",blocks.x, blocks.y, blocks.z);
 
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "sample_bits_cuda", ([&] {
                 cuda_sample_bits_kernel<<<blocks,threads>>>(
@@ -326,11 +379,8 @@ torch::Tensor cuda_sample_bits(torch::Tensor p, int n, torch::Dtype dtype, unsig
 
 torch::Tensor cuda_binary_weighted_sum(torch::Tensor input, torch::Tensor weights, int z_bits) {
     const int bitsize = 8 * elementSize(input.scalar_type());
-    const int threadsz = next_pow2to1024(z_bits);
-    int threadsy = next_pow2(input.size(1));
-    if (1024 / threadsz < threadsy) {
-        threadsy = 1024 / threadsz;
-    }
+    const int threadsz = next_pow2_clip(z_bits, 1024);
+    int threadsy = next_pow2_clip(input.size(1), 1024 / threadsz);
     const dim3 threads(threadsy, threadsz);
     const dim3 blocks(ceil_div(input.size(1), threadsy), ceil_div(z_bits, threadsz));
     auto ret = torch::zeros({input.size(1), z_bits}, torch::TensorOptions().dtype(torch::kFloat16).device(input.device()));

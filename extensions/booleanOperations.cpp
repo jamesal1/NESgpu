@@ -6,6 +6,7 @@ torch::Tensor cuda_pack(torch::Tensor input, torch::Dtype dtype);
 
 torch::Tensor cuda_unpack(torch::Tensor input);
 torch::Tensor cuda_binary_bmm(torch::Tensor A, torch::Tensor B);
+torch::Tensor cuda_binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey);
 torch::Tensor cuda_binary_seeded_bmv(torch::Tensor A, torch::Tensor B, unsigned long seed);
 torch::Tensor cuda_sample_bits(torch::Tensor p, int n, torch::Dtype dtype, unsigned long seed);
 torch::Tensor cuda_binary_weighted_sum(torch::Tensor input, torch::Tensor weights, int z_bits);
@@ -56,6 +57,16 @@ torch::Tensor binary_bmm(torch::Tensor A, torch::Tensor B) {
     return cuda_binary_bmm(A,B);
 }
 
+torch::Tensor binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey) {
+    CHECK_INPUT(input);
+    CHECK_INPUT(filter);
+    TORCH_CHECK(input.size(0)==filter.size(0), "Batch dim doesn't match");
+    TORCH_CHECK(input.size(3)==filter.size(4), "number  of input channels don't match");
+    TORCH_CHECK(input.device()==filter.device(), "Tensors are on different devices");
+    TORCH_CHECK(input.scalar_type()==filter.scalar_type(), "Tensors have different types");
+    return cuda_binary_batch_conv2d(input, filter, padx, pady, stridex, stridey);
+}
+
 torch::Tensor binary_seeded_bmv(torch::Tensor A, torch::Tensor B, unsigned long seed) {
     CHECK_INPUT(A);
     CHECK_INPUT(B);
@@ -79,8 +90,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("pack8", &pack8, "pack8 (CUDA)");
   m.def("pack", &pack, "pack (CUDA)");
   m.def("unpack", &unpack, "unpack (CUDA)");
-  m.def("binary_bmm", &binary_bmm, "binary_bmm (CUDA)");
-  m.def("binary_seeded_bmv", &binary_seeded_bmv, "binary_seeded_bmv (CUDA)");
+  m.def("binary_bmm", &binary_bmm, "binary bmm (CUDA)");
+  m.def("binary_batch_conv2d", &binary_batch_conv2d, "binary batch conv2d (CUDA)");
+  m.def("binary_seeded_bmv", &binary_seeded_bmv, "binary seeded bmv (CUDA)");
   m.def("sample_bits", &sample_bits, "sample bits (CUDA)");
   m.def("binary_weighted_sum", &binary_weighted_sum, "binary weighted sum (CUDA)");
 }

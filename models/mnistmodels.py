@@ -75,7 +75,7 @@ class MNISTBinaryDenseNet(nn.Module):
     def __init__(self, directions, action_size, in_channels=1):
         super(MNISTBinaryDenseNet,self).__init__()
         layers = []
-        layers += [binary.BinarizedLinear(784, 784 * 8, directions, dtype=torch.int8)]
+        layers += [binary.BinarizedLinear(784 * 8, 784, directions, dtype=torch.int8)]
         for i in range(2):
             layers += [binary.BinarizedLinear(784, 784, directions)]
         layers += [binary.BinarizedLinear(784, action_size, directions)]
