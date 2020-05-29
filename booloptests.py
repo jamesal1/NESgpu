@@ -10,12 +10,12 @@ def time_function(fun, *args):
 
 
 boolop_cuda = load(name="boolop_cuda", sources=["extensions/booleanOperations.cpp","extensions/booleanOperationsCuda.cu"])
+boolutil_cuda = load(name="boolutil_cuda", sources=["extensions/booleanUtilities.cpp","extensions/booleanUtilitiesCuda.cu"])
 
-boolop_cuda.unpack(torch.ones(5,8,device="cuda",dtype=torch.int32))
 
 def pack(input, dtype=torch.int32):
     bits = torch.iinfo(dtype).bits
-    return boolop_cuda.pack(input,  bits)
+    return boolutil_cuda.pack(input,  bits)
 
 
 def bmm_test(packA, packB):
@@ -31,13 +31,13 @@ def pack32_test(A):
     packA = pack(A,dtype=torch.int32)
 
 def pack8_test(A):
-    packA = boolop_cuda.pack8(A)
+    packA = boolutil_cuda.pack8(A)
 
 def unpack_test(packA):
-    boolop_cuda.unpack(packA)
+    boolutil_cuda.unpack(packA)
 
 def sample(P, batch_dim):
-    return boolop_cuda.sample_bits(P, batch_dim, 64, 999)
+    return boolutil_cuda.sample_bits(P, batch_dim, 64, 999)
 
 def naive_sample(size):
     return torch.randint(2, size=size, device="cuda", dtype=torch.bool)
@@ -46,12 +46,17 @@ def naive_bmm(A,B):
     return torch.bmm(A, B)
 
 def weighted_sum(packA, ws, inner_dim):
-    return boolop_cuda.binary_weighted_sum(packA, ws, inner_dim)
+    return boolutil_cuda.binary_weighted_sum(packA, ws, inner_dim)
 
 def conv(packed_input, packed_filter):
     padding = 2
     stride = 1
     return boolop_cuda.binary_batch_conv2d(packed_input, packed_filter, padding, padding, stride, stride)
+
+def conv_old(packed_input, packed_filter):
+    padding = 2
+    stride = 1
+    return boolop_cuda.binary_batch_conv2d_old(packed_input, packed_filter, padding, padding, stride, stride)
 
 def conv_naive(naive_input, naive_filter, batch_dim):
     padding = 2
@@ -88,7 +93,7 @@ def check_result():
                 print(torch.allclose((cuda_res * 2 - (filter_size ** 2 * in_dim)).type(torch.float16), naive_res))
                 # print((cuda_res * 2 - (filter_size ** 2 * in_dim)), naive_res)
                 # exit()
-check_result()
+# check_result()
 
 def speedtests():
     batch_dim = 2 ** 10
@@ -151,8 +156,8 @@ def speedtests():
 def speed_conv():
     repeat = 5
     batch_dim = 2 ** 10
-    out_dim = 64
-    in_dim = 64
+    out_dim = 128
+    in_dim = 128
     filter_size = 3
     input_size = 64
     dtype = torch.int32
@@ -171,6 +176,9 @@ def speed_conv():
     print("conv")
     for i in range(repeat):
         print(time_function(conv, packed_input, packed_filter))
+    print("conv old")
+    for i in range(repeat):
+        print(time_function(conv_old, packed_input, packed_filter))
     print("conv naive")
     for i in range(repeat):
         print(time_function(conv_naive, naive_input, naive_filter, batch_dim))
