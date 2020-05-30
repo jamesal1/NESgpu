@@ -49,17 +49,17 @@ def weighted_sum(packA, ws, inner_dim):
     return boolutil_cuda.binary_weighted_sum(packA, ws, inner_dim)
 
 def conv(packed_input, packed_filter):
-    padding = 2
+    padding = 1
     stride = 1
     return boolop_cuda.binary_batch_conv2d(packed_input, packed_filter, padding, padding, stride, stride)
 
 def conv_old(packed_input, packed_filter):
-    padding = 2
+    padding = 1
     stride = 1
     return boolop_cuda.binary_batch_conv2d_old(packed_input, packed_filter, padding, padding, stride, stride)
 
 def conv_naive(naive_input, naive_filter, batch_dim):
-    padding = 2
+    padding = 1
     stride = 1
     return torch.conv2d(torch.nn.functional.pad(naive_input,(padding,) * 4, value=-1), naive_filter, stride=(stride, stride), groups=batch_dim)
 
@@ -156,11 +156,15 @@ def speedtests():
 def speed_conv():
     repeat = 5
     batch_dim = 2 ** 10
-    out_dim = 128
-    in_dim = 128
-    filter_size = 3
-    input_size = 64
-    dtype = torch.int32
+    out_dim = 256
+    in_dim = 256
+    filter_size = 4
+    input_size = 32
+    # out_dim = 64
+    # in_dim = 24
+    # filter_size = 5
+    # input_size = 32
+    dtype = torch.int64
     input = torch.randint(2, size=(batch_dim * input_size ** 2, in_dim), device="cuda", dtype=torch.bool)
     filter = torch.randint(2, size=(batch_dim * out_dim * filter_size ** 2, in_dim), device="cuda", dtype=torch.bool)
     packed_input = pack(input, dtype).view(batch_dim, input_size, input_size, -1)
