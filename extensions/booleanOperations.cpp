@@ -2,10 +2,13 @@
 
 
 torch::Tensor cuda_binary_bmm(torch::Tensor A, torch::Tensor B);
-torch::Tensor cuda_binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey);
+torch::Tensor cuda_binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int filterx, int filtery, int padx, int pady, int stridex, int stridey);
 torch::Tensor cuda_binary_seeded_bmv(torch::Tensor A, torch::Tensor B, unsigned long seed);
 torch::Tensor cuda_batch_im2col(torch::Tensor input, int filterx, int filtery, int padx, int pady, int stridex, int stridey);
-torch::Tensor cuda_batch_im2col_old(torch::Tensor input, int filterx, int filtery, int padx, int pady, int stridex, int stridey);
+
+torch::Tensor cuda_binary_batch_conv2d_old(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey);
+torch::Tensor cuda_binary_batch_conv2d_old_shared(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey);
+
 
 #define CHECK_CUDA(x) AT_ASSERTM(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
@@ -37,24 +40,18 @@ torch::Tensor binary_bmm(torch::Tensor A, torch::Tensor B) {
     return cuda_binary_bmm(A,B);
 }
 
-torch::Tensor binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey) {
+torch::Tensor binary_batch_conv2d(torch::Tensor input, torch::Tensor filter, int filterx, int filtery, int padx, int pady, int stridex, int stridey) {
     CHECK_INPUT(input);
     CHECK_INPUT(filter);
     TORCH_CHECK(input.size(0)==filter.size(0), "Batch dim doesn't match");
-    TORCH_CHECK(input.size(3)==filter.size(4), "number  of input channels don't match");
     TORCH_CHECK(input.device()==filter.device(), "Tensors are on different devices");
     TORCH_CHECK(input.scalar_type()==filter.scalar_type(), "Tensors have different types");
-    return cuda_binary_batch_conv2d(input, filter, padx, pady, stridex, stridey);
+    return cuda_binary_batch_conv2d(input, filter, filterx, filtery, padx, pady, stridex, stridey);
 }
 
 torch::Tensor batch_im2col(torch::Tensor input, int filterx, int filtery, int padx, int pady, int stridex, int stridey) {
     CHECK_INPUT(input);
     return cuda_batch_im2col(input, filterx, filtery , padx, pady, stridex, stridey);
-}
-
-torch::Tensor batch_im2col_old(torch::Tensor input, int filterx, int filtery, int padx, int pady, int stridex, int stridey) {
-    CHECK_INPUT(input);
-    return cuda_batch_im2col_old(input, filterx, filtery , padx, pady, stridex, stridey);
 }
 
 
@@ -65,10 +62,33 @@ torch::Tensor binary_seeded_bmv(torch::Tensor A, torch::Tensor B, unsigned long 
     return cuda_binary_seeded_bmv(A,B, seed);
 }
 
+torch::Tensor binary_batch_conv2d_old(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey) {
+    CHECK_INPUT(input);
+    CHECK_INPUT(filter);
+    TORCH_CHECK(input.size(0)==filter.size(0), "Batch dim doesn't match");
+    TORCH_CHECK(input.size(3)==filter.size(4), "number  of input channels don't match");
+    TORCH_CHECK(input.device()==filter.device(), "Tensors are on different devices");
+    TORCH_CHECK(input.scalar_type()==filter.scalar_type(), "Tensors have different types");
+    return cuda_binary_batch_conv2d_old(input, filter, padx, pady, stridex, stridey);
+}
+
+torch::Tensor binary_batch_conv2d_old_shared(torch::Tensor input, torch::Tensor filter, int padx, int pady, int stridex, int stridey) {
+    CHECK_INPUT(input);
+    CHECK_INPUT(filter);
+    TORCH_CHECK(input.size(0)==filter.size(0), "Batch dim doesn't match");
+    TORCH_CHECK(input.size(3)==filter.size(4), "number  of input channels don't match");
+    TORCH_CHECK(input.device()==filter.device(), "Tensors are on different devices");
+    TORCH_CHECK(input.scalar_type()==filter.scalar_type(), "Tensors have different types");
+    return cuda_binary_batch_conv2d_old_shared(input, filter, padx, pady, stridex, stridey);
+}
+
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("binary_bmm", &binary_bmm, "binary bmm (CUDA)");
   m.def("batch_im2col", &batch_im2col, "batch im2col(CUDA)");
-  m.def("batch_im2col_old", &batch_im2col_old, "batch im2col(CUDA)");
   m.def("binary_batch_conv2d", &binary_batch_conv2d, "binary batch conv2d (CUDA)");
   m.def("binary_seeded_bmv", &binary_seeded_bmv, "binary seeded bmv (CUDA)");
+
+  m.def("binary_batch_conv2d_old", &binary_batch_conv2d_old, "binary batch conv2d (CUDA)");
+  m.def("binary_batch_conv2d_old_shared", &binary_batch_conv2d_old_shared, "binary batch conv2d (CUDA)");
 }
