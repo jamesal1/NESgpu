@@ -143,7 +143,8 @@ __global__ void cuda_batch_im2col_kernel(torch::PackedTensorAccessor32<long,3,to
 }
 
 __global__ void cuda_batch_im2colint_kernel(torch::PackedTensorAccessor32<int,3,torch::RestrictPtrTraits> output,
-                                                   const torch::PackedTensorAccessor32<int,4,torch::RestrictPtrTraits> input,
+                                            const torch::PackedTensorAccessor32<int,4,torch::RestrictPtrTraits> input,
+                                                  cudaTextureObject_t input_tex,
                                                    const int filterx, const int filtery,
                                                    const int padx, const int pady,
                                                    const int stridex, const int stridey) {
@@ -162,7 +163,7 @@ __global__ void cuda_batch_im2colint_kernel(torch::PackedTensorAccessor32<int,3,
             const int x_in = i + x_out * stridex - padx;
             const int y_in = j + y_out * stridey - pady;
             output[batch][loc][element] = (x_in >= 0 && x_in < input.size(1) && y_in >= 0 && y_in < input.size(2)) ?
-                input[batch][x_in][y_in][channel] : 0;
+                tex1Dfetch<int>(input_tex, ((batch * input.size(1) + x_in) * input.size(2) + y_in) * input.size(3) + channel) : 0;
         }
 }
 
@@ -248,18 +249,45 @@ torch::Tensor cuda_batch_im2col(torch::Tensor input, int filterx, int filtery, i
     const int threadsz = 1;
     const dim3 threads(threadsx, threadsy, threadsz);
     const dim3 blocks(ceil_div(output.size(2) ,threads.x) , ceil_div(output.size(1), threads.y), ceil_div(output.size(0), threads.z));
+
+//    cudaResourceDesc resDesc;
+//    memset(&resDesc, 0, sizeof(resDesc));
+//    resDesc.resType = cudaResourceTypeLinear;
+//    resDesc.res.linear.devPtr = input.data_ptr();
+//    resDesc.res.linear.desc.f = cudaChannelFormatKindNone;
+//    resDesc.res.linear.desc.x = 8 * elementSize(input.scalar_type()); // bits per channel
+//    resDesc.res.linear.sizeInBytes = input.size(0) * input.size(1) * input.size(2) * input.size(3) * sizeof(input.scalar_type());
+
+//    cudaTextureDesc texDesc;
+//    memset(&texDesc, 0, sizeof(texDesc));
+//    texDesc.readMode = cudaReadModeElementType;
+
+//    cudaTextureObject_t tex=0;
+//    cudaCreateTextureObject(&tex, &resDesc, &texDesc, NULL);
+
+
+
+
+
     if (input.scalar_type() == torch::kInt64) {
     cuda_batch_im2col_kernel<<<blocks,threads>>>(output.packed_accessor32<long,3,torch::RestrictPtrTraits>(),
                                    input.packed_accessor32<long,4,torch::RestrictPtrTraits>(),
                                    filterx, filtery,
                                    padx, pady, stridex, stridey);
     } else {
-    cuda_batch_im2colint_kernel<<<blocks,threads>>>(output.packed_accessor32<int32_t,3,torch::RestrictPtrTraits>(),
-                                   input.packed_accessor32<int32_t,4,torch::RestrictPtrTraits>(),
-                                   filterx, filtery,
-                                   padx, pady, stridex, stridey);
+//    cuda_batch_im2colint_kernel<<<blocks,threads>>>(output.packed_accessor32<int32_t,3,torch::RestrictPtrTraits>(),
+//                                    input.packed_accessor32<int32_t,4,torch::RestrictPtrTraits>(),
+//                                   tex,
+//                                   filterx, filtery,
+//                                   padx, pady, stridex, stridey);
     }
-        return output;
+
+    // destroy texture object
+//    cudaDestroyTextureObject(tex);
+
+
+
+    return output;
 }
 
 

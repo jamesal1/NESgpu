@@ -1,6 +1,7 @@
 import torch
 from torch.utils.cpp_extension import load
 import time
+from extensions import booleanOperations
 def time_function(fun, *args):
     torch.cuda.synchronize()
     start = time.time()
@@ -64,6 +65,10 @@ def conv_old_shared(packed_input, packed_filter, padding=1, stride=1):
 
 def im2col(packed_input, packed_filter, padding=1, stride=1):
     return boolop_cuda.batch_im2col(packed_input, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
+
+def im2colpycuda(packed_input, packed_filter, padding=1, stride=1):
+    return booleanOperations.batch_im2col(packed_input, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
+
 
 
 def conv_naive(naive_input, naive_filter, batch_dim, padding=1, stride=1):
@@ -179,7 +184,7 @@ def speedtests():
 
 def speed_conv():
     repeat = 5
-    batch_dim = 2 ** 6
+    batch_dim = 2 ** 5
     out_dim = 64
     in_dim = 4 * 24
     filter_size = 7
@@ -235,9 +240,13 @@ def speed_conv():
     P = torch.rand(out_dim * filter_size ** 2,in_dim, device="cuda", dtype=torch.float16)
     ws = torch.rand(batch_dim, device="cuda", dtype=torch.float16)
     print(im2col(packed_input, packed_filter).shape)
+    print(torch.allclose(im2col(packed_input, packed_filter),im2colpycuda(packed_input,packed_filter)))
     print("im2col")
     for i in range(repeat):
         print(time_function(im2col, packed_input, packed_filter, padding, stride))
+    print("im2colpycuda")
+    for i in range(repeat):
+        print(time_function(im2colpycuda, packed_input, packed_filter, padding, stride))
     print("reorder")
     for i in range(repeat):
         print(time_function(reorder, packed_input, packed_filter, padding, stride))
