@@ -1,7 +1,6 @@
-
 extern "C"
-__global__ void batch_im2col_kernel(long *output,
-                                    const long *input,
+__global__ void texture_batch_im2col_kernel(int *output,
+                                    cudaTextureObject_t input,
                                     const int output0, const int output1, const int output2,
                                     const int input1, const int input2, const int input3,
                                                    const int filterx, const int filtery,
@@ -21,6 +20,8 @@ __global__ void batch_im2col_kernel(long *output,
             const int x_in = i + x_out * stridex - padx;
             const int y_in = j + y_out * stridey - pady;
             output[(batch * output1 + loc) * output2 + element] = (x_in >= 0 && x_in < input1 && y_in >= 0 && y_in < input2) ?
-                input[((batch * input1 + x_in) * input2 + y_in) * input3 + channel] : 0;
+                tex1Dfetch<int>(input,((batch * input1 + x_in) * input2 + y_in) * input3 + channel) : 0;
+//                tex3D<int>(input,batch * input1 + x_in, y_in, channel) : 0;
+//                tex3D<int>(input, channel, y_in, batch * input1 + x_in) : 0;
         }
 }

@@ -144,7 +144,7 @@ __global__ void cuda_batch_im2col_kernel(torch::PackedTensorAccessor32<long,3,to
 
 __global__ void cuda_batch_im2colint_kernel(torch::PackedTensorAccessor32<int,3,torch::RestrictPtrTraits> output,
                                             const torch::PackedTensorAccessor32<int,4,torch::RestrictPtrTraits> input,
-                                                  cudaTextureObject_t input_tex,
+//                                                  cudaTextureObject_t input_tex,
                                                    const int filterx, const int filtery,
                                                    const int padx, const int pady,
                                                    const int stridex, const int stridey) {
@@ -163,7 +163,7 @@ __global__ void cuda_batch_im2colint_kernel(torch::PackedTensorAccessor32<int,3,
             const int x_in = i + x_out * stridex - padx;
             const int y_in = j + y_out * stridey - pady;
             output[batch][loc][element] = (x_in >= 0 && x_in < input.size(1) && y_in >= 0 && y_in < input.size(2)) ?
-                tex1Dfetch<int>(input_tex, ((batch * input.size(1) + x_in) * input.size(2) + y_in) * input.size(3) + channel) : 0;
+                 input[batch][x_in][y_in][channel] : 0;
         }
 }
 
@@ -275,11 +275,11 @@ torch::Tensor cuda_batch_im2col(torch::Tensor input, int filterx, int filtery, i
                                    filterx, filtery,
                                    padx, pady, stridex, stridey);
     } else {
-//    cuda_batch_im2colint_kernel<<<blocks,threads>>>(output.packed_accessor32<int32_t,3,torch::RestrictPtrTraits>(),
-//                                    input.packed_accessor32<int32_t,4,torch::RestrictPtrTraits>(),
+    cuda_batch_im2colint_kernel<<<blocks,threads>>>(output.packed_accessor32<int32_t,3,torch::RestrictPtrTraits>(),
+                                    input.packed_accessor32<int32_t,4,torch::RestrictPtrTraits>(),
 //                                   tex,
-//                                   filterx, filtery,
-//                                   padx, pady, stridex, stridey);
+                                   filterx, filtery,
+                                   padx, pady, stridex, stridey);
     }
 
     // destroy texture object
@@ -370,9 +370,6 @@ torch::Tensor cuda_binary_batch_conv2d_old(torch::Tensor input, torch::Tensor fi
                                    input.packed_accessor32<long,4,torch::RestrictPtrTraits>(),
                                    filter.packed_accessor32<long,5,torch::RestrictPtrTraits>(),
                                    padx, pady, stridex, stridey);
-
-
-
         return output;
 }
 

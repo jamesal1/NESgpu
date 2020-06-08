@@ -54,11 +54,24 @@ def conv(packed_input, packed_filter, padding=1, stride=1):
     packed_filter_reordered = packed_filter.permute([0, 2, 3, 4, 1]).view(packed_filter.size(0), -1, packed_filter.size(1)).contiguous()
     return boolop_cuda.binary_batch_conv2d(packed_input, packed_filter_reordered, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
 
+def conv_bmm_cupy(packed_input, packed_filter, padding=1, stride=1):
+    packed_filter_reordered = packed_filter.permute([0, 2, 3, 4, 1]).view(packed_filter.size(0), -1, packed_filter.size(1)).contiguous()
+    return booleanOperations.conv_bmm(packed_input, packed_filter_reordered, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
+
+def texture_conv_bmm_cupy(packed_input, packed_filter, padding=1, stride=1):
+    packed_filter_reordered = packed_filter.permute([0, 2, 3, 4, 1]).view(packed_filter.size(0), -1, packed_filter.size(1)).contiguous()
+    return booleanOperations.texture_conv_bmm(packed_input, packed_filter_reordered, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
+
+
+
 def reorder(packed_input, packed_filter, padding=1, stride=1):
     packed_filter_reordered = packed_filter.permute([0, 2, 3, 4, 1]).view(packed_filter.size(0), -1, packed_filter.size(1)).contiguous()
 
 def conv_old(packed_input, packed_filter, padding=1, stride=1):
     return boolop_cuda.binary_batch_conv2d_old(packed_input, packed_filter, padding, padding, stride, stride)
+
+def conv_cupy(packed_input, packed_filter, padding=1, stride=1):
+    return booleanOperations.batch_conv2d(packed_input, packed_filter, padding, padding, stride, stride)
 
 def conv_old_shared(packed_input, packed_filter, padding=1, stride=1):
     return boolop_cuda.binary_batch_conv2d_old_shared(packed_input, packed_filter, padding, padding, stride, stride)
@@ -66,8 +79,14 @@ def conv_old_shared(packed_input, packed_filter, padding=1, stride=1):
 def im2col(packed_input, packed_filter, padding=1, stride=1):
     return boolop_cuda.batch_im2col(packed_input, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
 
-def im2colpycuda(packed_input, packed_filter, padding=1, stride=1):
+def im2colcupy(packed_input, packed_filter, padding=1, stride=1):
     return booleanOperations.batch_im2col(packed_input, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
+
+def im2colinput(packed_input, packed_filter, padding=1, stride=1):
+    return booleanOperations.batch_im2col_input(packed_input, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
+
+def im2coltexture(packed_input, packed_filter, padding=1, stride=1):
+    return booleanOperations.texture_batch_im2col(packed_input, packed_filter.size(2), packed_filter.size(3), padding, padding, stride, stride)
 
 
 
@@ -79,16 +98,21 @@ def check_result():
     # out_dim = 65
     # in_dim = 63
     # input_size = 17
+    # batch_dim = 128
+    # out_dim = 65
+    # in_dim = 64
+    # input_size = 32
     batch_dim = 128
     out_dim = 65
-    in_dim = 64
+    in_dim = 65
     input_size = 32
-    dtype = torch.int64
+    dtype = torch.int32
     for filter_size in [1, 3, 7]:
         for padding in range(3):
             for stride in range(1,4):
+                # stride = 2
                 # padding = 1
-                # filter_size = 3
+                # filter_size = 5
                 print(filter_size, padding, stride)
 
                 input = torch.randint(2, size=(batch_dim * input_size ** 2, in_dim), device="cuda", dtype=torch.bool)
@@ -101,12 +125,16 @@ def check_result():
                 packed_input = pack(input, dtype).view(batch_dim, input_size, input_size, -1)
                 packed_filter = pack(filter, dtype).view(batch_dim, out_dim, filter_size, filter_size, -1)
 
-                # packed_input = 1 + torch.arange(packed_input.nelement(), device="cuda", dtype=torch.int64).view_as(packed_input)
+                # packed_input = 1 + torch.arange(packed_input.nelement(), device="cuda", dtype=dtype).view_as(packed_input)
                 # print(packed_input.squeeze())
-                # print(boolop_cuda.batch_im2col(packed_input, filter_size, filter_size, padding, padding, stride, stride))
+                im2col1 = boolop_cuda.batch_im2col(packed_input, filter_size, filter_size, padding, padding, stride, stride)
+                im2col2 = booleanOperations.batch_im2col_input(packed_input, filter_size, filter_size, padding, padding, stride, stride)
+                print(torch.allclose(im2col1, im2col2))
+                # print(booleanOperations.texture_batch_im2col(packed_input, filter_size, filter_size, padding, padding, stride, stride))
                 # print(boolop_cuda.batch_im2col_old(packed_input, filter_size, filter_size, padding, padding, stride, stride))
                 packed_filter = packed_filter.permute([0, 2, 3, 4, 1]).view(batch_dim, -1, out_dim).contiguous()
-                cuda_res = boolop_cuda.binary_batch_conv2d(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
+                # cuda_res = boolop_cuda.binary_batch_conv2d(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
+                cuda_res = booleanOperations.conv_bmm(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
                 naive_input = (2 * (input.type(torch.float16) - .5)).view(batch_dim, input_size, input_size, in_dim)\
                     .permute([0, 3, 1, 2]).contiguous().view(1, batch_dim * in_dim, input_size, input_size)
                 naive_filter = (-2 * (filter.type(torch.float16) - .5)).view(batch_dim , out_dim, filter_size, filter_size, in_dim) \
@@ -135,7 +163,7 @@ def speedtests():
     A = torch.randint(2, size=(batch_dim * out_dim, inner_dim), device="cuda", dtype=torch.bool)
     A2 = torch.randint(2, size=(batch_dim * out_dim * 4, inner_dim // 4), device="cuda", dtype=torch.bool)
     B = torch.randint(2, size=(batch_dim, inner_dim), device="cuda", dtype=torch.bool)
-    dtype = torch.int64
+    dtype = torch.int32
     packA = pack(A, dtype)
     packB = pack(B, dtype)
     P = torch.rand(out_dim,inner_dim, device="cuda", dtype=torch.float16)
@@ -184,14 +212,14 @@ def speedtests():
 
 def speed_conv():
     repeat = 5
-    batch_dim = 2 ** 5
+    batch_dim = 2 ** 8
     out_dim = 64
-    in_dim = 4 * 24
+    in_dim = 24
     filter_size = 7
     input_size = 224
     padding = 3
     stride = 2
-    # batch_dim = 2 ** 10
+    # batch_dim = 2 ** 6
     # out_dim = 64
     # in_dim = 64
     # filter_size = 3
@@ -224,50 +252,81 @@ def speed_conv():
     # in_dim = 256
     # filter_size = 3
     # input_size = 16 * 8
-    dtype = torch.int64
-    dtype_naive = torch.float32
+
+    dtype = torch.int32
+    dtype_naive = torch.float16
     input = torch.randint(2, size=(batch_dim * input_size ** 2, in_dim), device="cuda", dtype=torch.bool)
     filter = torch.randint(2, size=(batch_dim * out_dim * filter_size ** 2, in_dim), device="cuda", dtype=torch.bool)
     packed_input = pack(input, dtype).view(batch_dim, input_size, input_size, -1)
     packed_filter = pack(filter, dtype).view(batch_dim, out_dim, filter_size, filter_size, -1)
-    naive_input = (2 * (input.type(dtype_naive) - .5)).view(batch_dim, input_size, input_size, in_dim) \
-        .permute([0, 3, 1, 2]).contiguous().view(1, batch_dim * in_dim, input_size, input_size)
-    naive_filter = (-2 * (filter.type(dtype_naive) - .5)).view(batch_dim , out_dim, filter_size, filter_size, in_dim) \
-        .permute([0, 1, 4, 2, 3]).contiguous().view(batch_dim * out_dim, in_dim, filter_size, filter_size)
-    small_input = naive_input[:,::32]
-    small_filter = naive_filter[:,::32]
-    dtype = torch.int64
-    P = torch.rand(out_dim * filter_size ** 2,in_dim, device="cuda", dtype=torch.float16)
-    ws = torch.rand(batch_dim, device="cuda", dtype=torch.float16)
-    print(im2col(packed_input, packed_filter).shape)
-    print(torch.allclose(im2col(packed_input, packed_filter),im2colpycuda(packed_input,packed_filter)))
+
+    del input
+    del filter
+    print(packed_input.shape)
+    # naive_input = (2 * (input.type(dtype_naive) - .5)).view(batch_dim, input_size, input_size, in_dim) \
+    #     .permute([0, 3, 1, 2]).contiguous().view(1, batch_dim * in_dim, input_size, input_size)
+    # naive_filter = (-2 * (filter.type(dtype_naive) - .5)).view(batch_dim , out_dim, filter_size, filter_size, in_dim) \
+    #     .permute([0, 1, 4, 2, 3]).contiguous().view(batch_dim * out_dim, in_dim, filter_size, filter_size)
+    # small_input = naive_input[:,::32]
+    # small_filter = naive_filter[:,::32]
+
+    # P = torch.rand(out_dim * filter_size ** 2,in_dim, device="cuda", dtype=torch.float16)
+    # ws = torch.rand(batch_dim, device="cuda", dtype=torch.float16)
+    # print(im2col(packed_input, packed_filter).shape)
+    # cols = im2col(packed_input, packed_filter)
+    cols = im2colcupy(packed_input, packed_filter)
+    cols2 = torch.zeros_like(cols)
+    print(cols.nelement())
+    # print(im2coltexture(packed_input,packed_filter))
+    # print(im2colcupy(packed_input,packed_filter))
+    # print(torch.allclose(im2col(packed_input, packed_filter),im2colcupy(packed_input,packed_filter)))
+    # print(torch.allclose(im2colinput(packed_input, packed_filter),im2colcupy(packed_input,packed_filter)))
+    # print(torch.allclose(im2col(packed_input, packed_filter),im2coltexture(packed_input,packed_filter)))
+    # print(torch.allclose(conv_cupy(packed_input, packed_filter),conv_old(packed_input,packed_filter)))
+    # print(torch.allclose(conv_cupy(packed_input, packed_filter),conv_old(packed_input,packed_filter)))
     print("im2col")
     for i in range(repeat):
         print(time_function(im2col, packed_input, packed_filter, padding, stride))
-    print("im2colpycuda")
+    print("im2colcupy")
     for i in range(repeat):
-        print(time_function(im2colpycuda, packed_input, packed_filter, padding, stride))
+        print(time_function(im2colcupy, packed_input, packed_filter, padding, stride))
+    print("im2colinput")
+    for i in range(repeat):
+        print(time_function(im2colinput, packed_input, packed_filter, padding, stride))
+    # print("im2coltexture")
+    # for i in range(repeat):
+    #     print(time_function(im2coltexture, packed_input, packed_filter, padding, stride))
     print("reorder")
     for i in range(repeat):
         print(time_function(reorder, packed_input, packed_filter, padding, stride))
     print("conv")
     for i in range(repeat):
         print(time_function(conv, packed_input, packed_filter, padding, stride))
-    print("conv old")
+    print("conv_bmm_cupy")
     for i in range(repeat):
-        print(time_function(conv_old, packed_input, packed_filter, padding, stride))
-    print("conv old shared")
+        print(time_function(conv_bmm_cupy, packed_input, packed_filter, padding, stride))
+    print("texture_conv_bmm_cupy")
     for i in range(repeat):
-        print(time_function(conv_old_shared, packed_input, packed_filter, padding, stride))
-    print("conv naive")
-    for i in range(repeat):
-        print(time_function(conv_naive, naive_input, naive_filter, batch_dim, padding, stride))
-    print("conv naive small")
-    for i in range(repeat):
-        print(time_function(conv_naive, small_input, small_filter, batch_dim, padding, stride))
+        print(time_function(texture_conv_bmm_cupy, packed_input, packed_filter, padding, stride))
+    # print("conv_cupy")
+    # for i in range(repeat):
+    #     print(time_function(conv_cupy, packed_input, packed_filter, padding, stride))
+    # print("conv old")
+    # for i in range(repeat):
+    #     print(time_function(conv_old, packed_input, packed_filter, padding, stride))
+    # print("conv old shared")
+    # for i in range(repeat):
+    #     print(time_function(conv_old_shared, packed_input, packed_filter, padding, stride))
+    # print("conv naive")
+    # for i in range(repeat):
+    #     print(time_function(conv_naive, naive_input, naive_filter, batch_dim, padding, stride))
+    # print("conv naive small")
+    # for i in range(repeat):
+    #     print(time_function(conv_naive, small_input, small_filter, batch_dim, padding, stride))
+    # pack_dtype = torch.int32
     # print("pack")
     # for i in range(repeat):
-    #     print(time_function(pack_test, filter, dtype))
+    #     print(time_function(pack_test, filter, pack_dtype))
     # print("pack32")
     # for i in range(repeat):
     #     print(time_function(pack32_test, filter))
@@ -276,7 +335,7 @@ def speed_conv():
     #     print(time_function(pack8_test, filter))
     # print("pack (vector)")
     # for i in range(repeat):
-    #     print(time_function(pack_test, input, dtype))
+    #     print(time_function(pack_test, input, pack_dtype))
     # print("pack32 (vector)")
     # for i in range(repeat):
     #     print(time_function(pack32_test, input))
