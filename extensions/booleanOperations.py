@@ -5,12 +5,12 @@ import cupy as cp
 import cupy.cuda.texture as cptex
 import cupy.cuda.runtime as cprun
 def long_to_int(st):
-    return st.replace("long","int").replace("popcll","popc")
+    return st.replace("long", "int").replace("popcll", "popc").replace("ELEMENT_SIZE 64", "ELEMENT_SIZE 32")
 
 
 kernels = {}
 
-for file in "batch_im2col,batch_im2col_input,batch_conv2d,bmm".split(","):
+for file in "batch_im2col,batch_im2col_input,batch_conv2d,bmm,pack,sample_bits".split(","):
     with open("extensions/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = {torch.int64: cp.RawKernel(text, file+"_kernel"), torch.int32: cp.RawKernel(long_to_int(text),file+"_kernel")}
@@ -37,7 +37,7 @@ def ceil_div(a, b):
 
 
 def tensor_cupy_type(tensor):
-    dtype = tensor.dtype
+    dtype = tensor.dtype if isinstance(tensor, torch.Tensor) else tensor
     if dtype == torch.int64:
         return cp.int64
     if dtype == torch.int32:
@@ -122,7 +122,7 @@ def batch_conv2d(input, filter, padx, pady, stridex, stridey):
     hw = h * w
     bo = filter.size(0) * filter.size(1)
 
-    channels = cptex.ChannelFormatDescriptor(32,0,0,0,cprun.cudaChannelFormatKindSigned)
+    channels = cptex.ChannelFormatDescriptor(32, 0, 0, 0, cprun.cudaChannelFormatKindSigned)
     cuArr = cptex.CUDAarray(channels, input.size(3), input.size(2), input.size(1) * input.size(0))
     cuArr.copy_from(cp.asarray(input.view(-1, input.size(2), input.size(3))))
     resDesc = cptex.ResourceDescriptor(cprun.cudaResourceTypeArray, cuArr=cuArr)
@@ -207,3 +207,29 @@ def conv_bmm(input, filter, filterx, filtery, padx, pady, stridex, stridey):
 def texture_conv_bmm(input, filter, filterx, filtery, padx, pady, stridex, stridey):
     cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
     return texture_bmm(cols, filter)
+
+def pack(input, dtype=torch.int32):
+    BLOCK_SIZE = 16 ** 2
+    ret_size1 = ceil_div(input.shape[1], torch.iinfo(dtype).bits)
+    threadsx = next_pow2_clip(ret_size1, BLOCK_SIZE)
+    threadsy = BLOCK_SIZE // threadsx
+    block = (threadsx, threadsy, 1)
+    grid = (ceil_div(ret_size1, threadsx), ceil_div(input.size(0), threadsy))
+    ret = cp.empty((input.size(0),ret_size1), dtype=tensor_cupy_type(dtype))
+    kernels["pack"][dtype](grid, block, args=[
+        ret, input.data_ptr(), *ret.shape, input.shape[1]
+    ])
+    return torch.as_tensor(ret, device=input.device)
+
+def sample_bits(p, n, dtype, seed):
+    raise NotImplemented #some trouble with includes
+    ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
+    ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
+    threadsx = next_pow2_clip(ret_size2, 1024)
+    threadsy = next_pow2_clip(p.shape[0], 1024 // threadsx)
+    block = (threadsx, threadsy, 1)
+    grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), n)
+    kernels["sample_bits"][dtype](grid, block, args=[
+        ret, p.data_ptr(), *ret.shape, p.shape[1], seed
+    ])
+    return torch.as_tensor(ret, device=p.device)

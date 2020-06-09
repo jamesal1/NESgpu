@@ -30,8 +30,6 @@ __global__ void bmm_kernel(int *C,
         }
         __syncthreads();
 
-//            tmp += __popcll(Asub[j][x_sub] ^ Bsub[j][y_sub]);
-
 
         #pragma unroll
         for (int a = 0; a < MULT_A; a++) {
@@ -40,14 +38,7 @@ __global__ void bmm_kernel(int *C,
         #pragma unroll
         for (int j = 0; j < BLOCK_SIZE; j++) {
             const int j1 = (x_sub + y_sub + j) & 15;
-
-//                    tmp[a * MULT_B + b] += __popcll(Asub[a * BLOCK_SIZE + x_sub][j] ^ Bsub[j][b * BLOCK_SIZE + y_sub]);
-
                     tmp[a * MULT_B + b] += __popcll(Asub[a][x_sub][j1] ^ Bsub[b][j1][y_sub]);
-//                    tmp[a * MULT_B + b] += __popcll(Asub[a][x_sub][j] ^ Bsub[b][j][y_sub]);
-//                    tmp[a * MULT_B + b] += __popcll(Asub[a][x_sub][j] ^ Bsub[b][j][y_sub]);
-//                    tmp[a * MULT_B + b] += __popcll(Asub[a][j][x_sub] ^ Bsub[b][j][y_sub]);
-//                    tmp[a * MULT_B + b] += __popcll(Asub[j][a * BLOCK_SIZE + x_sub] ^ Bsub[j][b * BLOCK_SIZE + y_sub]);
                 }
             }
         }
