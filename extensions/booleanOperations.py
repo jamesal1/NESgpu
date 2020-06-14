@@ -9,9 +9,10 @@ def long_to_int(st):
 
 class KernelWrapper():
 
-    def __init__(self, raw, name):
+    def __init__(self, raw, name, backend="nvrtc"):
         self.raw = raw
         self.name = name
+        self.backend = backend
         self.saved = {}
 
     def __call__(self, *args, **kwargs):
@@ -25,7 +26,7 @@ class KernelWrapper():
             for a, b in args[1:]:
                 text = text.replace(a,b)
 
-            self.saved[req] = cp.RawKernel(text, self.name)
+            self.saved[req] = cp.RawKernel(text, self.name, backend=self.backend)
         return self.saved[req]
 
     def __getitem__(self, item):
@@ -41,14 +42,19 @@ for file in "batch_im2col,batch_im2col_input,batch_conv2d,bmm,bmmT,pack,weighted
     with open("extensions/src/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = KernelWrapper(text, file+"_kernel")
+
+for file in "sample_bits".split(","):
+    with open("extensions/src/{}.cu".format(file)) as f:
+        text = f.read()
+        kernels[file] = KernelWrapper(text, file+"_kernel","nvcc")
 for file in "texture_batch_im2col,texture_bmm".split(","):
     with open("extensions/src/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = {torch.int32: cp.RawKernel(text, file+"_kernel")}
-for file in "sample_bits".split(","): #slower, probably because of some compiler flag
-    f = "extensions/src/{}.ptx".format(file)
-    # f = "extensions/src/{}.cubin".format(file)
-    kernels[file] = {torch.int64: cp.RawModule(path=f).get_function(file+"_kernel")}
+# for file in "sample_bits".split(","): #slower, probably because of some compiler flag
+#     f = "extensions/src/{}.ptx".format(file)
+#     # f = "extensions/src/{}.cubin".format(file)
+#     kernels[file] = {torch.int64: cp.RawModule(path=f).get_function(file+"_kernel")}
 
 def next_pow2_clip(v, cap):
     if (v > cap // 2):
@@ -275,13 +281,25 @@ def pack(input, dtype=torch.int32):
     ])
     return torch.as_tensor(ret, device=input.device)
 
+# def sample_bits(p, n, dtype, seed):
+#     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
+#     ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
+#     threadsx = next_pow2_clip(ret_size2, 128)
+#     threadsy = next_pow2_clip(p.shape[0], 128 // threadsx)
+#     block = (threadsx, threadsy, 1)
+#     grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), 1)
+#     kernels["sample_bits"][dtype](grid, block, args=[
+#         ret, p.data_ptr(), *ret.shape, p.shape[1], seed
+#     ])
+#     return torch.as_tensor(ret, device=p.device)
+
 def sample_bits(p, n, dtype, seed):
+    BLOCK_SIZE = 128
     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
-    ret = cp.zeros((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
-    threadsx = next_pow2_clip(ret_size2, 1024)
-    threadsy = next_pow2_clip(p.shape[0], 1024 // threadsx)
-    block = (threadsx, threadsy, 1)
-    grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), n)
+    ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
+    threadsx = BLOCK_SIZE
+    block = (threadsx, 1, 1)
+    grid = (ceil_div(n, threadsx), p.size(0), ret_size2)
     kernels["sample_bits"][dtype](grid, block, args=[
         ret, p.data_ptr(), *ret.shape, p.shape[1], seed
     ])

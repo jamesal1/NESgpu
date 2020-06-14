@@ -255,17 +255,17 @@ def speedtests():
                             B.view(batch_dim, inner_dim, 1).type(torch.float16)))
 
 def speed_conv():
-    repeat = 2
+    repeat = 3
 
     for batch_dim, out_dim, in_dim, filter_size, input_size, padding, stride in \
         [(2 ** 7, 64, 24, 7, 224, 3, 2),
-        (2 ** 7, 64, 64, 3, 56, 1, 1),
-        (2 ** 7, 128, 128, 3, 28, 1, 1),
-        (2 ** 7, 256, 256, 3, 14, 1, 1),
+        # (2 ** 7, 64, 64, 3, 56, 1, 1),
+        # (2 ** 7, 128, 128, 3, 28, 1, 1),
+        # (2 ** 7, 256, 256, 3, 14, 1, 1),
         (2 ** 7, 512, 512, 3, 7, 1, 1)]:
         print(batch_dim, out_dim, in_dim, filter_size, input_size, padding, stride)
 
-        dtype = torch.int64
+        dtype = torch.int32
         dtype_naive = torch.float16
         input = torch.randint(2, size=(batch_dim * input_size ** 2, in_dim), device="cuda", dtype=torch.bool)
         input_int = torch.randint(2, size=(batch_dim, input_size ** 2, in_dim), device="cuda", dtype=torch.int32)

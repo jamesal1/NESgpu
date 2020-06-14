@@ -100,9 +100,7 @@ __global__ void cuda_sample_bits_kernel(torch::PackedTensorAccessor32<scalar_t,3
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int z = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.z * blockDim.z + threadIdx.z;
-    const int zlen = blockDim.y * gridDim.y;
-    const int ylen = blockDim.z * gridDim.z;
-    const int seq = x * ylen * zlen + y * zlen  + z;
+    const int seq = x * ret.size(1) * ret.size(2) + y * ret.size(2)  + z;
     curandState state;
     curand_init(seed + seq, 0, 0, &state);
     const int z_input = z * elementSize;
