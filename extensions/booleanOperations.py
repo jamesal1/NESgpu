@@ -281,29 +281,19 @@ def pack(input, dtype=torch.int32):
     ])
     return torch.as_tensor(ret, device=input.device)
 
-# def sample_bits(p, n, dtype, seed):
-#     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
-#     ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
-#     threadsx = next_pow2_clip(ret_size2, 128)
-#     threadsy = next_pow2_clip(p.shape[0], 128 // threadsx)
-#     block = (threadsx, threadsy, 1)
-#     grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), 1)
-#     kernels["sample_bits"][dtype](grid, block, args=[
-#         ret, p.data_ptr(), *ret.shape, p.shape[1], seed
-#     ])
-#     return torch.as_tensor(ret, device=p.device)
-
 def sample_bits(p, n, dtype, seed):
     BLOCK_SIZE = 128
     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
     ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
     threadsx = BLOCK_SIZE
-    block = (threadsx, 1, 1)
-    grid = (ceil_div(n, threadsx), p.size(0), ret_size2)
+    threadsy = 1
+    block = (threadsx, threadsy, 1)
+    grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), 1)
     kernels["sample_bits"][dtype](grid, block, args=[
         ret, p.data_ptr(), *ret.shape, p.shape[1], seed
     ])
     return torch.as_tensor(ret, device=p.device)
+
 
 def weighted_sum(input, weights, zbits):
     BLOCK_SIZE = 64
