@@ -13,8 +13,8 @@ __global__ void bmm_kernel(int *C,
     const int z = blockIdx.z * blockDim.z + threadIdx.z;
     const int x_sub = threadIdx.y;
     const int y_sub = threadIdx.x;
-    __shared__ long Asub[MULT_A][BLOCK_SIZE][BLOCK_SIZE];
-//    __shared__ long Asub[BLOCK_SIZE][MULT_A * BLOCK_SIZE + 1];
+//    __shared__ long Asub[MULT_A][BLOCK_SIZE][BLOCK_SIZE];
+    __shared__ long Asub[MULT_A][BLOCK_SIZE][BLOCK_SIZE + 1];
     __shared__ long Bsub[MULT_B][BLOCK_SIZE][BLOCK_SIZE];
     int tmp[MULT_A * MULT_B] = {0};
     for (int inner_block = 0; inner_block < (A2 + BLOCK_SIZE - 1) / BLOCK_SIZE; inner_block++) {
@@ -37,8 +37,9 @@ __global__ void bmm_kernel(int *C,
         for (int b = 0; b < MULT_B; b++) {
         #pragma unroll
         for (int j = 0; j < BLOCK_SIZE; j++) {
-            const int j1 = (x_sub + y_sub + j) & 15;
-                    tmp[a * MULT_B + b] += __popcll(Asub[a][x_sub][j1] ^ Bsub[b][j1][y_sub]);
+//            const int j1 = (x_sub + y_sub + j) & 15;
+//                    tmp[a * MULT_B + b] += __popcll(Asub[a][x_sub][j1] ^ Bsub[b][j1][y_sub]);
+                    tmp[a * MULT_B + b] += __popcll(Asub[a][x_sub][j] ^ Bsub[b][j][y_sub]);
                 }
             }
         }

@@ -4,7 +4,7 @@
 #define ELEMENT_SIZE 64
 extern "C"
 
-__global__ void cuda_sample_bits_kernel(long *ret,
+__global__ void sample_bits_kernel(long *ret,
                                         const __half *input,
                                         const int ret0, const int ret1, const int ret2,
                                         const int input1,
@@ -19,11 +19,25 @@ __global__ void cuda_sample_bits_kernel(long *ret,
     curand_init(seed + seq, 0, 0, &state);
     const int z_input = z * ELEMENT_SIZE;
     if (x < ret0 && y < ret1 && z < ret2) {
-        int end = input1 - z_input;
+        long c = 1;
         long tmp = 0;
-        for (int i = 0; i < ELEMENT_SIZE; i++) {
-            tmp |= i < end ? ( __half2float(input[y * input1 + z_input + i]) > curand_uniform(&state)) << i : 0;
+        int end = input1 - z_input;
+        if (end > ELEMENT_SIZE) {
+            end = ELEMENT_SIZE;
         }
+        for (int i = 0; i < end; i++) {
+//            tmp |= c * ( __half2float(input[y * input1 + z_input + i]) > curand_uniform(&state));
+            tmp |= ((long)( __half2float(input[y * input1 + z_input + i]) > curand_uniform(&state))) << i;
+            c *= 2;
+        }
+
+//        for (int i = 0; i < ELEMENT_SIZE; i++) {
+////            tmp |=  i < end ? c * ( __half2float(input[y * input1 + z_input + i]) > curand_uniform(&state)) : 0;
+//            c *= 2;
+////            tmp |= i < end ? ((long) ( __half2float(input[y * input1 + z_input + i]) > curand_uniform(&state))) << i : 0;
+//        }
+
         ret[(x * ret1 + y) * ret2 + z] = tmp;
     }
 }
+

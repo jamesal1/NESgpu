@@ -91,14 +91,14 @@ __global__ void cuda_unpack_kernel(torch::PackedTensorAccessor32<bool,2,torch::R
 
 
 
-
+//there's a bug causing an occasional element to not be set
 template <typename scalar_t>
 __global__ void cuda_sample_bits_kernel(torch::PackedTensorAccessor32<scalar_t,3,torch::RestrictPtrTraits> ret,
                                         const torch::PackedTensorAccessor32<torch::Half,2,torch::RestrictPtrTraits> input,
                                         const int elementSize,
                                         const unsigned long seed) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int z = blockIdx.y * blockDim.y + threadIdx.y; //thank whoever made 64 max threads for z
+    const int z = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.z * blockDim.z + threadIdx.z;
     const int zlen = blockDim.y * gridDim.y;
     const int ylen = blockDim.z * gridDim.z;
@@ -123,6 +123,7 @@ __global__ void cuda_sample_bits_kernel(torch::PackedTensorAccessor32<scalar_t,3
     }
 }
 
+//there's a bug affecting the last element somewhere
 template <typename scalar_t>
 __global__ void cuda_binary_weighted_sum_kernel(torch::PackedTensorAccessor32<torch::Half,2,torch::RestrictPtrTraits> ret,
                                     const torch::PackedTensorAccessor32<scalar_t,3,torch::RestrictPtrTraits> input,
