@@ -258,11 +258,12 @@ def speed_conv():
     repeat = 3
 
     for batch_dim, out_dim, in_dim, filter_size, input_size, padding, stride in \
-        [(2 ** 7, 64, 24, 7, 224, 3, 2),
-        # (2 ** 7, 64, 64, 3, 56, 1, 1),
-        # (2 ** 7, 128, 128, 3, 28, 1, 1),
-        # (2 ** 7, 256, 256, 3, 14, 1, 1),
-        (2 ** 7, 512, 512, 3, 7, 1, 1)]:
+        [(2 ** 8, 64, 24, 7, 224, 3, 2),
+        # (2 ** 8, 64, 64, 3, 56, 1, 1),
+        # (2 ** 8, 128, 128, 3, 28, 1, 1),
+        # (2 ** 8, 256, 256, 3, 14, 1, 1),
+        (2 ** 8, 512, 512, 3, 7, 1, 1)]:
+        # (2 ** 7, 128, 2048, 3, 7, 1, 1)]:
         print(batch_dim, out_dim, in_dim, filter_size, input_size, padding, stride)
 
         dtype = torch.int32
@@ -283,7 +284,8 @@ def speed_conv():
         # small_input = naive_input[:,::32]
         # small_filter = naive_filter[:,::32]
 
-        P = torch.rand(out_dim * filter_size ** 2,in_dim, device="cuda", dtype=torch.float16)
+        # P = torch.rand(out_dim * filter_size ** 2,in_dim, device="cuda", dtype=torch.float16)
+        P = torch.rand(filter_size ** 2, out_dim * in_dim, device="cuda", dtype=torch.float16)
         # P = torch.ones(out_dim * filter_size ** 2,in_dim, device="cuda", dtype=torch.float16)
         ws = torch.rand(batch_dim, device="cuda", dtype=torch.float16)
 
@@ -303,6 +305,7 @@ def speed_conv():
         print(torch.allclose(sample(P, batch_dim, dtype),sample_cupy(P, batch_dim, dtype)))
         # print(sample(P, batch_dim, dtype).sum(),sample_cupy(P, batch_dim, dtype).sum())
         # print(sample(P, batch_dim, dtype))
+        # print(sample_cupy(P, batch_dim, dtype))
         # print(sample(P, batch_dim, dtype).nelement())
         # exit()
         # print(torch.allclose(booleanOperations.weighted_sum(packed_filter.view(batch_dim, -1, packed_filter.size(-1)), ws, in_dim).abs(),

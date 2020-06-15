@@ -282,9 +282,11 @@ def pack(input, dtype=torch.int32):
     return torch.as_tensor(ret, device=input.device)
 
 def sample_bits(p, n, dtype, seed):
-    BLOCK_SIZE = 128
+    BLOCK_SIZE = 64
     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
     ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
+    threadsy = BLOCK_SIZE
+    threadsx = 1
     threadsx = BLOCK_SIZE
     threadsy = 1
     block = (threadsx, threadsy, 1)
