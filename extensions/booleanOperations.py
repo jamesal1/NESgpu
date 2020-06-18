@@ -24,7 +24,10 @@ class KernelWrapper():
             elif args[0] != torch.int64:
                 raise NotImplemented
             for a, b in args[1:]:
-                text = text.replace(a,b)
+                if isinstance(b,int):
+                    text = text.replace("{} {}".format(a,"X"),"{} {}".format(a,b))
+                else:
+                    text = text.replace(a,b)
 
             self.saved[req] = cp.RawKernel(text, self.name, backend=self.backend)
         return self.saved[req]
@@ -38,7 +41,7 @@ kernels = {}
 
 
 
-for file in "batch_im2col,batch_im2col_input,batch_conv2d,bmm,bmmT,pack,weighted_sum".split(","):
+for file in "batch_im2col,bmm,bmmT,bmm_act,pack,weighted_sum,max_pool2d".split(","):
     with open("extensions/src/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = KernelWrapper(text, file+"_kernel")
@@ -47,14 +50,6 @@ for file in "sample_bits".split(","):
     with open("extensions/src/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = KernelWrapper(text, file+"_kernel","nvcc")
-for file in "texture_batch_im2col,texture_bmm".split(","):
-    with open("extensions/src/{}.cu".format(file)) as f:
-        text = f.read()
-        kernels[file] = {torch.int32: cp.RawKernel(text, file+"_kernel")}
-# for file in "sample_bits".split(","): #slower, probably because of some compiler flag
-#     f = "extensions/src/{}.ptx".format(file)
-#     # f = "extensions/src/{}.cubin".format(file)
-#     kernels[file] = {torch.int64: cp.RawModule(path=f).get_function(file+"_kernel")}
 
 def next_pow2_clip(v, cap):
     if (v > cap // 2):
@@ -93,7 +88,7 @@ def batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey, REPEAT =
     block = (threadsx, threadsy, threadsz)
     grid = ceil_div(output.shape[2], threadsx), ceil_div(output.shape[1], threadsy), ceil_div(output.shape[0], REPEAT * threadsz)
     # grid = ceil_div(output.shape[2], threadsx), ceil_div(output.shape[1], REPEAT * threadsy), ceil_div(output.shape[0], threadsz)
-    kernels["batch_im2col"][input.dtype,("REPEAT 1", "REPEAT {}".format(REPEAT))](grid, block, args=[
+    kernels["batch_im2col"][input.dtype,("REPEAT",REPEAT)](grid, block, args=[
         output,
         # cp.asarray(input),
         input.data_ptr(),
@@ -103,90 +98,11 @@ def batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey, REPEAT =
     ])
     return torch.as_tensor(output, device=input.device)
 
-def batch_im2col_input(input, filterx, filtery, padx, pady, stridex, stridey):
-    REPEAT = 1
-    h = (input.size(1) - filterx + 2 * padx) // stridex + 1
-    w = (input.size(2) - filtery + 2 * pady) // stridey + 1
-    xy = input.shape[1] * input.shape[2]
-    output = cp.zeros((input.size(0), h * w, filterx * filtery * input.size(3)), dtype=tensor_cupy_type(input))
-    threadsx = next_pow2_clip(input.shape[3], 256)
-    threadsy = next_pow2_clip(xy, 256 // threadsx)
-    threadsz = 1
-    block = (threadsx, threadsy, threadsz)
-    grid = ceil_div(input.shape[3], threadsx), ceil_div(xy, threadsy ), ceil_div(output.shape[0], REPEAT * threadsz)
-    kernels["batch_im2col_input"][input.dtype](grid, block, args=[
-        output,
-        # cp.asarray(input),
-        input.data_ptr(),
-        *output.shape,
-        *input.shape[1:],
-        filterx, filtery, padx, pady, stridex, stridey
-    ])
-    return torch.as_tensor(output, device=input.device)
-
-def texture_batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey):
-    h = (input.size(1) - filterx + 2 * padx) // stridex + 1
-    w = (input.size(2) - filtery + 2 * pady) // stridey + 1
-
-    output = cp.zeros((input.size(0), h * w, filterx * filtery * input.size(3)), dtype=tensor_cupy_type(input))
-    threadsx = next_pow2_clip(output.shape[2], 256)
-    threadsy = next_pow2_clip(output.shape[1], 256 // threadsx)
-    threadsz = 1
-    block = (threadsx, threadsy, threadsz)
-    grid = ceil_div(output.shape[2], threadsx), ceil_div(output.shape[1], threadsy), ceil_div(output.shape[0], threadsz)
-    channels = cptex.ChannelFormatDescriptor(32,0,0,0,cprun.cudaChannelFormatKindSigned)
-    # cuArr = cptex.CUDAarray(channels, input.size(3), input.size(2), input.size(1) * input.size(0))
-    # cuArr.copy_from(cp.asarray(input.view(-1, input.size(2), input.size(3))))
-    # resDesc = cptex.ResourceDescriptor(cprun.cudaResourceTypeArray, cuArr=cuArr)
-    arr = cp.asarray(input)
-    resDesc = cptex.ResourceDescriptor(cprun.cudaResourceTypeLinear, arr=arr, chDesc=channels, sizeInBytes=arr.size*arr.dtype.itemsize)
-    texDesc = cptex.TextureDescriptor(addressModes=(cprun.cudaAddressModeBorder,) * 1)
-    tex = cptex.TextureObject(resDesc,texDesc)
-    kernels["texture_batch_im2col"][input.dtype](grid, block, args=[
-        output,
-        tex,
-        *output.shape,
-        *input.shape[1:],
-        filterx, filtery, padx, pady, stridex, stridey
-    ])
-    return torch.as_tensor(output, device=input.device)
-
-def batch_conv2d(input, filter, padx, pady, stridex, stridey):
-    h = (input.size(1) - filter.size(2) + 2 * padx) // stridex + 1
-    w = (input.size(2) - filter.size(3) + 2 * pady) // stridey + 1
-    output = cp.zeros((filter.size(0), h, w, filter.size(1)), dtype=cp.int32)
-    hw = h * w
-    bo = filter.size(0) * filter.size(1)
-
-    channels = cptex.ChannelFormatDescriptor(32, 0, 0, 0, cprun.cudaChannelFormatKindSigned)
-    cuArr = cptex.CUDAarray(channels, input.size(3), input.size(2), input.size(1) * input.size(0))
-    cuArr.copy_from(cp.asarray(input.view(-1, input.size(2), input.size(3))))
-    resDesc = cptex.ResourceDescriptor(cprun.cudaResourceTypeArray, cuArr=cuArr)
-    # arr = cp.asarray(input)
-    # resDesc = cptex.ResourceDescriptor(cprun.cudaResourceTypeLinear, arr=arr, chDesc=channels, sizeInBytes=arr.size*arr.dtype.itemsize)
-    texDesc = cptex.TextureDescriptor(addressModes=(cprun.cudaAddressModeBorder,) * 1)
-    tex = cptex.TextureObject(resDesc, texDesc)
 
 
-    threadsx = next_pow2_clip(hw, 256)
-    threadsy = next_pow2_clip(bo, 256 / threadsx)
-    block = (threadsx, threadsy, 1)
-    grid = (ceil_div(hw, threadsx),ceil_div(bo, threadsy), 1)
-    kernels["batch_conv2d"][input.dtype](grid, block, args=[
-        output,
-        # input.data_ptr(),
-        # cp.asarray(input),
-        tex,
-        filter.data_ptr(),
-        *output.shape,
-        *input.shape[1:],
-        *filter.shape[1:],
-         padx, pady, stridex, stridey
-    ])
-    return torch.as_tensor(output, device=input.device)
 
 def bmm(A,B):
-    BLOCK_SIZE = 16
+    BLOCK_SIZE = 8
     MULT_A = 4
     MULT_B = 4
     C = cp.empty((A.size(0), A.size(1), B.size(2)), dtype=cp.int32)
@@ -195,10 +111,31 @@ def bmm(A,B):
     threadsz = 1
     block = threadsx, threadsy, threadsz
     grid = ceil_div(C.shape[2], threadsx * MULT_B), ceil_div(C.shape[1], threadsy * MULT_A), ceil_div(C.shape[0], threadsz)
-    kernels["bmm"][A.dtype](grid, block, args=[
+    kernels["bmm"][A.dtype,("BLOCK_SIZE",BLOCK_SIZE),("MULT_A", MULT_A),("MULT_B", MULT_B)](grid, block, args=[
         C,
         A.data_ptr(),
         B.data_ptr(),
+        *C.shape[1:],
+        *A.shape[1:],
+        *B.shape[1:]
+    ])
+    return torch.as_tensor(C, device=A.device)
+
+def bmm_act(A,B, threshold):
+    BLOCK_SIZE = 8
+    MULT_A = 4
+    MULT_B = 4
+    C = cp.empty((A.size(0), A.size(1), B.size(2)), dtype=cp.bool)
+    threadsx = BLOCK_SIZE
+    threadsy = BLOCK_SIZE
+    threadsz = 1
+    block = threadsx, threadsy, threadsz
+    grid = ceil_div(C.shape[2], threadsx * MULT_B), ceil_div(C.shape[1], threadsy * MULT_A), ceil_div(C.shape[0], threadsz)
+    kernels["bmm_act"][A.dtype,("BLOCK_SIZE",BLOCK_SIZE),("MULT_A", MULT_A),("MULT_B", MULT_B)](grid, block, args=[
+        C,
+        A.data_ptr(),
+        B.data_ptr(),
+        threshold.data_ptr(),
         *C.shape[1:],
         *A.shape[1:],
         *B.shape[1:]
@@ -215,7 +152,7 @@ def bmmT(A,B):
     threadsz = 1
     block = threadsx, threadsy, threadsz
     grid = ceil_div(C.shape[2], threadsx * MULT_B), ceil_div(C.shape[1], threadsy * MULT_A), ceil_div(C.shape[0], threadsz)
-    kernels["bmmT"][A.dtype](grid, block, args=[
+    kernels["bmmT"][A.dtype,("BLOCK_SIZE",BLOCK_SIZE),("MULT_A", MULT_A),("MULT_B", MULT_B)](grid, block, args=[
         C,
         A.data_ptr(),
         B.data_ptr(),
@@ -225,48 +162,22 @@ def bmmT(A,B):
     ])
     return torch.as_tensor(C, device=A.device)
 
-def texture_bmm(A,B):
-    BLOCK_SIZE = 8
-    C = cp.zeros((A.size(0), A.size(1), B.size(2)), dtype=cp.int32)
-    channels = cptex.ChannelFormatDescriptor(32,0,0,0,cprun.cudaChannelFormatKindSigned)
-    # cuArrA = cptex.CUDAarray(channels, A.size(2), A.size(1), A.size(0))
-    # cuArrB = cptex.CUDAarray(channels, B.size(2), B.size(1), B.size(0))
-    # cuArrA.copy_from(cp.asarray(A))
-    # cuArrB.copy_from(cp.asarray(B))
-    # resDescA = cptex.ResourceDescriptor(cprun.cudaResourceTypeArray, cuArr=cuArrA)
-    # resDescB = cptex.ResourceDescriptor(cprun.cudaResourceTypeArray, cuArr=cuArrB)
-    arrA = cp.asarray(A)
-    arrB = cp.asarray(B)
-    resDescA = cptex.ResourceDescriptor(cprun.cudaResourceTypeLinear, arr=arrA, chDesc=channels, sizeInBytes=arrA.size*arrA.dtype.itemsize)
-    resDescB = cptex.ResourceDescriptor(cprun.cudaResourceTypeLinear, arr=arrB, chDesc=channels, sizeInBytes=arrB.size*arrB.dtype.itemsize)
-    texDesc = cptex.TextureDescriptor(addressModes=(cprun.cudaAddressModeBorder,) * 1)
-    texA = cptex.TextureObject(resDescA, texDesc)
-    texB = cptex.TextureObject(resDescB, texDesc)
-    threadsx = BLOCK_SIZE
-    threadsy = BLOCK_SIZE
-    threadsz = 1
-    block = threadsx, threadsy, threadsz
-    grid = ceil_div(C.shape[2], threadsx) , ceil_div(C.shape[1], threadsy), ceil_div(C.shape[0], threadsz)
-    kernels["texture_bmm"][A.dtype](grid, block, args=[
-        C,
-        texA,
-        texB,
-        *C.shape[1:],
-        *A.shape[1:],
-        *B.shape[1:]
-    ])
 
-def conv_bmm(input, filter, filterx, filtery, padx, pady, stridex, stridey, ):
+def conv(input, filter, filterx, filtery, padx, pady, stridex, stridey):
+    h = (input.size(1) - filterx + 2 * padx) // stridex + 1
+    w = (input.size(2) - filtery + 2 * pady) // stridey + 1
     cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
-    return bmm(cols, filter)
+    return bmm(cols, filter).view(input.size(0),h,w, -1)
+
+def conv_act(input, filter, threshold, filterx, filtery, padx, pady, stridex, stridey):
+    h = (input.size(1) - filterx + 2 * padx) // stridex + 1
+    w = (input.size(2) - filtery + 2 * pady) // stridey + 1
+    cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
+    return bmm_act(cols, filter, threshold).view(input.size(0),h,w, -1)
 
 def conv_bmmT(input, filter, filterx, filtery, padx, pady, stridex, stridey):
     cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
     return bmmT(cols, filter)
-
-def texture_conv_bmm(input, filter, filterx, filtery, padx, pady, stridex, stridey):
-    cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
-    return texture_bmm(cols, filter)
 
 def pack(input, dtype=torch.int32):
     BLOCK_SIZE = 16 ** 2
@@ -282,16 +193,14 @@ def pack(input, dtype=torch.int32):
     return torch.as_tensor(ret, device=input.device)
 
 def sample_bits(p, n, dtype, seed):
-    BLOCK_SIZE = 64
+    BLOCK_SIZE = 128
     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
     ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
-    threadsy = BLOCK_SIZE
-    threadsx = 1
     threadsx = BLOCK_SIZE
     threadsy = 1
     block = (threadsx, threadsy, 1)
     grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), 1)
-    kernels["sample_bits"][dtype](grid, block, args=[
+    kernels["sample_bits"][dtype, ("BLOCK_SIZE", BLOCK_SIZE)](grid, block, args=[
         ret, p.data_ptr(), *ret.shape, p.shape[1], seed
     ])
     return torch.as_tensor(ret, device=p.device)
@@ -307,3 +216,25 @@ def weighted_sum(input, weights, zbits):
         ret, input.data_ptr(), weights.data_ptr(), *ret.shape, *input.shape
     ])
     return torch.as_tensor(ret, device=input.device)
+
+
+def max_pool2d(input,filterx, filtery, padx, pady, stridex, stridey, REPEAT=128):
+    h = (input.size(1) - filterx + 2 * padx) // stridex + 1
+    w = (input.size(2) - filtery + 2 * pady) // stridey + 1
+
+    output = cp.empty((input.size(0), h * w, input.size(3)), dtype=tensor_cupy_type(input))
+    threadsx = next_pow2_clip(output.shape[2], 128)
+    threadsy = next_pow2_clip(output.shape[1], 128 // threadsx)
+    threadsz = 1
+    block = (threadsx, threadsy, threadsz)
+    grid = ceil_div(output.shape[2], threadsx), ceil_div(output.shape[1], threadsy), ceil_div(output.shape[0], REPEAT * threadsz)
+    # grid = ceil_div(output.shape[2], threadsx), ceil_div(output.shape[1], REPEAT * threadsy), ceil_div(output.shape[0], threadsz)
+    kernels["max_pool2d"][input.dtype,("REPEAT", REPEAT)](grid, block, args=[
+        output,
+        # cp.asarray(input),
+        input.data_ptr(),
+        *output.shape,
+        *input.shape[1:],
+        filterx, filtery, padx, pady, stridex, stridey
+    ])
+    return torch.as_tensor(output, device=input.device).view(input.size(0),h,w,input.size(3))

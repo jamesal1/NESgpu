@@ -2,9 +2,10 @@
 #define MULT_A X
 #define MULT_B X
 extern "C"
-__global__ void bmmT_kernel(int *C,
+__global__ void bmm_act_kernel(bool *C,
                            long *A,
                            long *B,
+                           int *thresh,
                            const int C1, const int C2,
                            const int A1, const int A2,
                            const int B1, const int B2) {
@@ -13,6 +14,7 @@ __global__ void bmmT_kernel(int *C,
     const int z = blockIdx.z * blockDim.z + threadIdx.z;
     const int x_sub = threadIdx.y;
     const int y_sub = threadIdx.x;
+//    __shared__ long Asub[MULT_A][BLOCK_SIZE][BLOCK_SIZE];
     __shared__ long Asub[MULT_A][BLOCK_SIZE][BLOCK_SIZE + 1];
     __shared__ long Bsub[MULT_B][BLOCK_SIZE][BLOCK_SIZE];
     int tmp[MULT_A * MULT_B] = {0};
@@ -25,7 +27,7 @@ __global__ void bmmT_kernel(int *C,
         }
         #pragma unroll
         for (int i = 0; i < MULT_B; i++) {
-            Bsub[i][x_sub][y_sub] = x_sub + inner < B2 ? B[(z * B1 + y + i * BLOCK_SIZE) * B2 + x_sub + inner] : 0;
+            Bsub[i][x_sub][y_sub] = x_sub + inner < A2 ? B[(z * B1 + x_sub + inner) * B2 + y + i * BLOCK_SIZE] : 0;
         }
         __syncthreads();
 
@@ -46,14 +48,17 @@ __global__ void bmmT_kernel(int *C,
     }
     #pragma unroll
     for (int a = 0; a < MULT_A; a++) {
-        if (x + a * BLOCK_SIZE < C1) {
+        const int x_cor = x + a * BLOCK_SIZE;
+        if (x_cor < C1) {
             #pragma unroll
             for (int b = 0; b < MULT_B; b++) {
-                  if (y + b * BLOCK_SIZE< C2) {
-                    C[(z * C1 + x + a * BLOCK_SIZE) * C2 + y + b * BLOCK_SIZE] = tmp[a * MULT_B + b];
+                  const int y_cor = y + b * BLOCK_SIZE;
+                  if (y_cor < C2) {
+                    C[(z * C1 + x_cor) * C2 + y_cor] = tmp[a * MULT_B + b] > thresh[z * B2 + y_cor]; // doesn't look like there will be a significant improvement by loading thresh
                  }
 
             }
         }
     }
+
 }

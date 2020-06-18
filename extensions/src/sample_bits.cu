@@ -1,7 +1,7 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <cuda_fp16.h>
-#define BLOCK_SIZE 64
+#define BLOCK_SIZE X
 #define ELEMENT_SIZE 64
 extern "C"
 

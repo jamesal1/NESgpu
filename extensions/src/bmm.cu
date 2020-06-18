@@ -1,6 +1,6 @@
-#define BLOCK_SIZE 16
-#define MULT_A 4
-#define MULT_B 4
+#define BLOCK_SIZE X
+#define MULT_A X
+#define MULT_B X
 extern "C"
 __global__ void bmm_kernel(int *C,
                            long *A,
@@ -58,35 +58,3 @@ __global__ void bmm_kernel(int *C,
         }
     }
 }
-//__global__ void bmm_kernel(int *C,
-//                           long *A,
-//                           long *B,
-//                           int C1, int C2,
-//                           int A1, int A2,
-//                           int B1, int B2) {
-//    const int y = blockIdx.x * blockDim.x + threadIdx.x;
-//    const int x = blockIdx.y * blockDim.y + threadIdx.y;
-//    const int z = blockIdx.z * blockDim.z + threadIdx.z;
-//    const int x_sub = threadIdx.y;
-//    const int y_sub = threadIdx.x;
-//    __shared__ long Asub[BLOCK_SIZE][BLOCK_SIZE + 1];
-//    __shared__ long Bsub[BLOCK_SIZE][BLOCK_SIZE + 1];
-//    int tmp = 0;
-//    for (int inner_block = 0; inner_block < (A2 + BLOCK_SIZE - 1) / BLOCK_SIZE; inner_block++) {
-//        const int inner = inner_block * BLOCK_SIZE;
-////        Asub[y_sub][z_sub] = z_sub + inner < A.size(2) ? A[x][y][z_sub + inner] : 0;
-////        Bsub[y_sub][z_sub] = y_sub + inner < A.size(2) ? B[x][y_sub + inner][z] : 0;
-//        Asub[x_sub][y_sub] = y_sub + inner < A2 ? A[(z * A1 + x) * A2 + y_sub + inner] : 0;
-//        Bsub[x_sub][y_sub] = x_sub + inner < A2 ? B[(z * B1 + x_sub + inner) * B2 + y] : 0;
-//        __syncthreads();
-//        for (int j = 0; j < BLOCK_SIZE; j++) {
-//            tmp += __popcll(Asub[x_sub][j] ^ Bsub[j][y_sub]);
-//        }
-//        __syncthreads();
-//    }
-//
-//
-//    if (x < C1 && y < C2) {
-//            C[(z * C1 + x) * C2 + y] = tmp;
-//    }
-//}
