@@ -127,9 +127,9 @@ def check_result():
     # in_dim = 64
     # input_size = 32
     batch_dim = 64
-    out_dim = 65
-    in_dim = 65
-    input_size = 32
+    out_dim = 512
+    in_dim = 512
+    input_size = 64
     # batch_dim = 1
     # out_dim = 1
     # in_dim = 1
@@ -156,6 +156,7 @@ def check_result():
                 print(filter_size, padding, stride)
 
                 input = torch.randint(2, size=(batch_dim * input_size ** 2, in_dim), device="cuda", dtype=torch.bool)
+                input8 = torch.randint(255,size=(batch_dim * input_size ** 2, in_dim // 8), device="cuda", dtype=torch.uint8)
                 filter = torch.randint(2, size=(batch_dim * out_dim * filter_size ** 2, in_dim), device="cuda", dtype=torch.bool)
                 thresh = torch.randint(filter_size ** 2 * in_dim, size=(batch_dim,out_dim), device="cuda", dtype=torch.int32)
                 thresh = (filter_size ** 2 * in_dim // 2) * torch.ones(size=(batch_dim,out_dim), device="cuda", dtype=torch.int32)
@@ -166,6 +167,8 @@ def check_result():
 
                 packed_input = pack(input, dtype).view(batch_dim, input_size, input_size, -1)
                 packed_filter = pack(filter, dtype).view(batch_dim, out_dim, filter_size, filter_size, -1)
+                print(packed_filter.shape)
+                packed_filter = packed_filter.permute([0,2,3,4,1]).contiguous().view(batch_dim,-1, out_dim)
 
                 # packed_input = 1 + torch.arange(packed_input.nelement(), device="cuda", dtype=dtype).view_as(packed_input)
                 # print(packed_input)
@@ -182,17 +185,20 @@ def check_result():
                 # print(mp)
                 # print(mpn)
                 print("maxpool",torch.allclose(mp, pmpn))
+
+                i8 = booleanOperations.int8pack(input8, dtype)
+                i8_test = booleanOperations.pack(boolutil_cuda.unpack(input8), dtype)
+                print(i8,i8_test)
+                print("int8pack",torch.allclose(i8, i8_test))
                 # exit()
                 im2col1 = boolop_cuda.batch_im2col(packed_input, filter_size, filter_size, padding, padding, stride, stride)
                 # print(torch.allclose(im2col1, im2col2))
                 # print(booleanOperations.texture_batch_im2col(packed_input, filter_size, filter_size, padding, padding, stride, stride))
                 # print(boolop_cuda.batch_im2col_old(packed_input, filter_size, filter_size, padding, padding, stride, stride))
                 # cuda_res = boolop_cuda.binary_batch_conv2d(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
-                # cuda_res = conv_bmm_cupy(packed_input, packed_filter, padding=padding, stride=stride)
-                cuda_res = conv_bmmT_cupy(packed_input, packed_filter, padding=padding, stride=stride)
 
-                cuda_act = conv_act(packed_input, packed_filter, thresh, padding=padding, stride=stride)
-                # cuda_res = booleanOperations.conv_bmm(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
+                # cuda_act = conv_act(packed_input, packed_filter, thresh, padding=padding, stride=stride)
+                cuda_res = booleanOperations.conv(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
                 # cuda_res = booleanOperations.conv_bmmT(packed_input, packed_filter, filter_size, filter_size, padding, padding, stride, stride)
                 naive_input = (2 * (input.type(torch.float16) - .5)).view(batch_dim, input_size, input_size, in_dim)\
                     .permute([0, 3, 1, 2]).contiguous().view(1, batch_dim * in_dim, input_size, input_size)
@@ -211,7 +217,7 @@ def check_result():
                 # print(cuda_res_act == cuda_act)
                 # print(cuda_res_act.sum(),cuda_act.sum())
                 # print(torch.all(cuda_res_act == cuda_act))
-                # print(torch.allclose((cuda_res * 2 - (filter_size ** 2 * in_dim)).type(torch.float16).view_as(naive_res), naive_res))
+                print("res",torch.allclose((cuda_res * 2 - (filter_size ** 2 * in_dim)).type(torch.float16).view_as(naive_res), naive_res))
                 # print((cuda_res * 2 - (filter_size ** 2 * in_dim)), naive_res)
                 # exit()
 
@@ -402,6 +408,6 @@ def speed_conv():
             print(time_function(maxpool2d_naive,input.view(batch_dim,input_size,input_size,in_dim)))
 
 
-# check_result()
+check_result()
 # speedtests()
-speed_conv()
+# speed_conv()

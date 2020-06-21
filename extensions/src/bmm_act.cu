@@ -22,12 +22,11 @@ __global__ void bmm_act_kernel(bool *C,
         const int inner = inner_block * BLOCK_SIZE;
         #pragma unroll
         for (int i = 0; i < MULT_A; i++) {
-//            Asub[i][y_sub][x_sub] = y_sub + inner < A2 ? A[(z * A1 + x + i * BLOCK_SIZE) * A2 + y_sub + inner] : 0;
-            Asub[i][x_sub][y_sub] = y_sub + inner < A2 ? A[(z * A1 + x + i * BLOCK_SIZE) * A2 + y_sub + inner] : 0;
+            Asub[i][x_sub][y_sub] = (y_sub + inner < A2 && x + i * BLOCK_SIZE < A1) ? A[(z * A1 + x + i * BLOCK_SIZE) * A2 + y_sub + inner] : 0;
         }
         #pragma unroll
         for (int i = 0; i < MULT_B; i++) {
-            Bsub[i][x_sub][y_sub] = x_sub + inner < A2 ? B[(z * B1 + x_sub + inner) * B2 + y + i * BLOCK_SIZE] : 0;
+            Bsub[i][x_sub][y_sub] = (x_sub + inner < A2 && y + i * BLOCK_SIZE < B2) ? B[(z * B1 + x_sub + inner) * B2 + y + i * BLOCK_SIZE] : 0;
         }
         __syncthreads();
 
@@ -54,7 +53,8 @@ __global__ void bmm_act_kernel(bool *C,
             for (int b = 0; b < MULT_B; b++) {
                   const int y_cor = y + b * BLOCK_SIZE;
                   if (y_cor < C2) {
-                    C[(z * C1 + x_cor) * C2 + y_cor] = tmp[a * MULT_B + b] > thresh[z * B2 + y_cor]; // doesn't look like there will be a significant improvement by loading thresh
+//                    C[(z * C1 + x_cor) * C2 + y_cor] = tmp[a * MULT_B + b] > thresh[z * B2 + y_cor]; // doesn't look like there will be a significant improvement by caching thresh
+                    C[(z * C1 + x_cor) * C2 + y_cor] = tmp[a * MULT_B + b] > 5; // doesn't look like there will be a significant improvement by caching thresh
                  }
 
             }

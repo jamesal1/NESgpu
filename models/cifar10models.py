@@ -3,19 +3,12 @@ import torch
 from torch import nn
 import math
 
-class AsType(nn.Module):
 
-    def __init__(self,dtype):
-        super(AsType, self).__init__()
-        self.dtype = dtype
-
-    def forward(self, x):
-        return x.type(self.dtype)
 
 class VGG11(nn.Module):
 
 
-    def __init__(self, directions, action_size, binary_last_layer=False, in_channels=24):
+    def __init__(self, directions, action_size, binary_last_layer=False, in_channels=24, device="cuda"):
         super(VGG11, self).__init__()
         kernel_size = 3
         padding = 1
@@ -25,19 +18,19 @@ class VGG11(nn.Module):
             if out_channels == "M":
                 layers += [binary.BinarizedMaxPool2d()]
             else:
-                layers += [binary.BinarizedConv2d(in_channels, out_channels, directions, kernel_size, padding=padding)]
-            in_channels = out_channels
+                layers += [binary.BinarizedConv2d(in_channels, out_channels, directions, kernel_size, padding=padding, device=device)]
+                in_channels = out_channels
         layers += [nn.Flatten()]
         for _ in range(2):
-            layers += [binary.BinarizedLinear(512, 512, directions)]
+            layers += [binary.BinarizedLinear(512, 512, directions, device=device)]
         if binary_last_layer:
-            layers += [binary.BinarizedLinear(512, action_size, directions)]
+            layers += [binary.BinarizedLinear(512, action_size, directions, device=device)]
         else:
-            layers += [AsType(dtype=torch.float16)]
-            layers += [base.PermutedLinear(512, action_size, directions)]
+            layers += [binary.AsType(dtype=torch.float16)]
+            layers += [base.PermutedLinear(512, action_size, directions).to(device).type(torch.float16)]
         self.layers = nn.Sequential(*layers)
 
 
     def forward(self, input):
-        return torch.log_softmax(self.layers.forward(input).squeeze(),dim=1)
+        return torch.log_softmax(self.layers.forward(input).squeeze().type(torch.float16), dim=1)
 

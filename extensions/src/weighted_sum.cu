@@ -36,9 +36,7 @@ __global__ void weighted_sum_kernel(__half *ret,
         #pragma unroll
         for (int x = 0; x < BLOCK_SIZE; x++) {
             if ((cache[x][z_element] >> z_bit) & 1) {
-//                tmp += (float) weights[x + x_offset];
                 tmp += (float) weight_cache[x];
-//                tmp += weights[x + x_offset];
 //                tmp += weight_cache[x];
             }
         }

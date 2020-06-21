@@ -1,4 +1,7 @@
 import torch
+from collections import namedtuple
+Stream = namedtuple('Stream', ['ptr'])
+torch_stream = Stream(ptr=torch.cuda.current_stream().cuda_stream)
 import numpy as np
 
 import cupy as cp
@@ -29,7 +32,7 @@ class KernelWrapper():
                 else:
                     text = text.replace(a,b)
 
-            self.saved[req] = cp.RawKernel(text, self.name, backend=self.backend)
+            self.saved[req] = cp.RawKernel(text, self.name, backend=self.backend, options=("-lineinfo",))
         return self.saved[req]
 
     def __getitem__(self, item):
@@ -41,7 +44,7 @@ kernels = {}
 
 
 
-for file in "batch_im2col,bmm,bmmT,bmm_act,pack,weighted_sum,max_pool2d".split(","):
+for file in "batch_im2col,bmm,bmmT,bmm_act,pack,int8pack,weighted_sum,max_pool2d".split(","):
     with open("extensions/src/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = KernelWrapper(text, file+"_kernel")
@@ -95,13 +98,17 @@ def batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey, REPEAT =
         *output.shape,
         *input.shape[1:],
         filterx, filtery, padx, pady, stridex, stridey
-    ])
+    ],stream=torch_stream)
     return torch.as_tensor(output, device=input.device)
 
 
 
 
 def bmm(A,B):
+    assert(len(A.shape) == 3)
+    assert(len(B.shape) == 3)
+    assert(A.size(0) == B.size(0))
+    assert(A.size(2) == B.size(1))
     BLOCK_SIZE = 8
     MULT_A = 4
     MULT_B = 4
@@ -118,10 +125,16 @@ def bmm(A,B):
         *C.shape[1:],
         *A.shape[1:],
         *B.shape[1:]
-    ])
+    ],stream=torch_stream)
     return torch.as_tensor(C, device=A.device)
 
 def bmm_act(A,B, threshold):
+    assert(len(A.shape) == 3)
+    assert(len(B.shape) == 3)
+    assert(len(threshold.shape) == 2)
+    assert(A.size(0) == B.size(0) == threshold.size(0))
+    assert(A.size(2) == B.size(1))
+    assert(threshold.size(1) == B.size(2))
     BLOCK_SIZE = 8
     MULT_A = 4
     MULT_B = 4
@@ -139,7 +152,8 @@ def bmm_act(A,B, threshold):
         *C.shape[1:],
         *A.shape[1:],
         *B.shape[1:]
-    ])
+    ],stream=torch_stream)
+    # cp.cuda.stream.get_current_stream().synchronize()
     return torch.as_tensor(C, device=A.device)
 
 def bmmT(A,B):
@@ -159,7 +173,7 @@ def bmmT(A,B):
         *C.shape[1:],
         *A.shape[1:],
         *B.shape[1:]
-    ])
+    ],stream=torch_stream)
     return torch.as_tensor(C, device=A.device)
 
 
@@ -180,6 +194,7 @@ def conv_bmmT(input, filter, filterx, filtery, padx, pady, stridex, stridey):
     return bmmT(cols, filter)
 
 def pack(input, dtype=torch.int32):
+    assert(len(input.shape)==2)
     BLOCK_SIZE = 16 ** 2
     ret_size1 = ceil_div(input.shape[1], torch.iinfo(dtype).bits)
     threadsx = next_pow2_clip(ret_size1, BLOCK_SIZE)
@@ -189,10 +204,25 @@ def pack(input, dtype=torch.int32):
     ret = cp.empty((input.size(0),ret_size1), dtype=tensor_cupy_type(dtype))
     kernels["pack"][dtype](grid, block, args=[
         ret, input.data_ptr(), *ret.shape, input.shape[1]
-    ])
+    ],stream=torch_stream)
+    return torch.as_tensor(ret, device=input.device)
+
+def int8pack(input, dtype=torch.int32):
+    assert(len(input.shape) == 2)
+    BLOCK_SIZE = 16 ** 2
+    ret_size1 = ceil_div(input.shape[1], torch.iinfo(dtype).bits // 8)
+    threadsx = next_pow2_clip(ret_size1, BLOCK_SIZE)
+    threadsy = BLOCK_SIZE // threadsx
+    block = (threadsx, threadsy, 1)
+    grid = (ceil_div(ret_size1, threadsx), ceil_div(input.size(0), threadsy))
+    ret = cp.empty((input.size(0), ret_size1), dtype=tensor_cupy_type(dtype))
+    kernels["int8pack"][dtype](grid, block, args=[
+        ret, input.data_ptr(), *ret.shape, input.shape[1]
+    ],stream=torch_stream)
     return torch.as_tensor(ret, device=input.device)
 
 def sample_bits(p, n, dtype, seed):
+    assert(len(p.shape) == 2)
     BLOCK_SIZE = 128
     ret_size2 = ceil_div(p.size(1), torch.iinfo(dtype).bits)
     ret = cp.empty((n, p.size(0), ret_size2), dtype=tensor_cupy_type(dtype))
@@ -202,11 +232,13 @@ def sample_bits(p, n, dtype, seed):
     grid = (ceil_div(ret_size2, threadsx), ceil_div(p.shape[0], threadsy), 1)
     kernels["sample_bits"][dtype, ("BLOCK_SIZE", BLOCK_SIZE)](grid, block, args=[
         ret, p.data_ptr(), *ret.shape, p.shape[1], seed
-    ])
+    ],stream=torch_stream)
     return torch.as_tensor(ret, device=p.device)
 
 
 def weighted_sum(input, weights, zbits):
+    assert(len(input.shape)==3)
+    assert(input.size(0)==weights.size(0))
     BLOCK_SIZE = 64
     ret = cp.empty((input.size(1), zbits), dtype=cp.float16)
     threadsx = BLOCK_SIZE
@@ -214,11 +246,12 @@ def weighted_sum(input, weights, zbits):
     grid = (ceil_div(zbits, threadsx), input.size(1), 1)
     kernels["weighted_sum"][input.dtype](grid, block, args=[
         ret, input.data_ptr(), weights.data_ptr(), *ret.shape, *input.shape
-    ])
+    ],stream=torch_stream)
     return torch.as_tensor(ret, device=input.device)
 
 
-def max_pool2d(input,filterx, filtery, padx, pady, stridex, stridey, REPEAT=128):
+def max_pool2d(input, filterx, filtery, padx, pady, stridex, stridey, REPEAT=128):
+    assert(len(input.shape) == 4)
     h = (input.size(1) - filterx + 2 * padx) // stridex + 1
     w = (input.size(2) - filtery + 2 * pady) // stridey + 1
 
@@ -236,5 +269,5 @@ def max_pool2d(input,filterx, filtery, padx, pady, stridex, stridey, REPEAT=128)
         *output.shape,
         *input.shape[1:],
         filterx, filtery, padx, pady, stridex, stridey
-    ])
+    ],stream=torch_stream)
     return torch.as_tensor(output, device=input.device).view(input.size(0),h,w,input.size(3))

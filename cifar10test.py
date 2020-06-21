@@ -1,7 +1,8 @@
 from torchvision import datasets, transforms
-from models import mnistmodels as models
+from models import cifar10models as models
 from modules import base, binary
 
+from extensions import booleanOperations
 import os
 import datetime
 import shutil
@@ -36,20 +37,18 @@ class Trainer():
         self.noise_scale = kwargs.get("noise_scale", 3e-3)
         # self.noise_scale_decay = 1 - kwargs.get("noise_scale_decay", 1e-3)
         self.noise_scale_decay = 1 - kwargs.get("noise_scale_decay", 0)
-        self.lr = kwargs.get("lr", 1e0)
+        self.lr = kwargs.get("lr", 1e-3)
         self.weight_decay = kwargs.get("weight_decay",0)
         # self.lr_decay = kwargs.get("lr_decay", 1e-2)
         self.ave_delta_rate = kwargs.get("ave_delta_rate", .99)
         self.epochs = kwargs.get("epochs", 1000)
-        self.batches_per_epoch = kwargs.get("batches_per_epoch",1)
-        self.batch_size = kwargs.get("batch_size",1)
-        self.directions = kwargs.get("directions",1)
+        self.batches_per_epoch = kwargs.get("batches_per_epoch", 1)
+        self.batch_size = kwargs.get("batch_size", 1)
+        self.directions = kwargs.get("directions", 1)
         self.max_steps = kwargs.get("max_steps", -1)
 
     def train(self):
-        self.model.batch_size=self.batch_size
-        if half_precision:
-            self.model = self.model.half()
+        self.model.batch_size = self.batch_size
         perturbed_model = base.PerturbedModel(self.model, self.directions)
         ave_delta = .005 * self.batch_size
         opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
@@ -64,21 +63,21 @@ class Trainer():
         #     drop_last = True,
         #     batch_size=self.batch_size, shuffle=True)
         train_loader = torch.utils.data.DataLoader(
-            datasets.MNIST('../data', train=True, download=True,
+            datasets.CIFAR10('../data', train=True, download=True,
                            transform=transforms.Compose([
                                transforms.ToTensor(),
                            ])),
             drop_last = True,
             batch_size=self.batch_size, shuffle=True)
         # test_loader = torch.utils.data.DataLoader(
-        #     datasets.MNIST('../data', train=False, transform=transforms.Compose([
+        #     datasets.CIFAR10('../data', train=False, transform=transforms.Compose([
         #         transforms.ToTensor(),
         #         transforms.Normalize((0.1307,), (0.3081,))
         #     ])),
         #     batch_size=self.test_batch_size, shuffle=True)
 
         for epoch in range(self.epochs):
-            print("Epoch:",epoch)
+            print("Epoch:", epoch)
             total_reward = 0.0
             total_game_length = 0.0
             total_cards = 0.0
@@ -89,14 +88,20 @@ class Trainer():
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.cuda()
                 data = (data * 255).type(torch.int8)
+
+                data = booleanOperations.int8pack(data.permute([0, 2, 3, 1]).contiguous().view(-1, 3), dtype=torch.int32).view(-1, 32, 32, 1)
+                print(data.shape)
                 target = target.cuda()
                 with torch.no_grad():
                     perturbed_model.set_seed()
                     perturbed_model.set_noise_scale(self.noise_scale)
                     perturbed_model.allocate_memory()
                     perturbed_model.set_noise()
+                    torch.cuda.synchronize()
                     pred = perturbed_model.forward(data)
-                    reward = torch.nn.NLLLoss(reduce=False)(pred,target)
+                    # continue
+                    # print(pred)
+                    reward = torch.nn.NLLLoss(reduce=False)(pred, target)
                     result = reward - reward.mean()
                     # step_size = result / ((ave_delta + 1e-5) * self.noise_scale)
                     step_size = result
@@ -127,15 +132,13 @@ class Trainer():
 
 if __name__ == "__main__":
     batch_size = 2 ** 8
-    directions = 2 ** 8
-
+    directions = batch_size
+    # t = torch.zeros( int(1.5 * 2 ** 30), device="cuda")
     # my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
     # my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
-    my_model = models.MNISTBinaryDenseNet(directions=directions, action_size=10,in_channels=1)
+    my_model = models.VGG11(directions=directions, action_size=10, in_channels=24)
     # Trainer(model.TransformerNet()).train()
-    if cuda_on:
-        my_model = my_model.cuda()
-    Trainer(my_model,batch_size=batch_size,directions=directions).train()
+    Trainer(my_model, batch_size=batch_size, directions=directions).train()
 
 
 
