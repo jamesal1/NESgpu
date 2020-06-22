@@ -89,10 +89,14 @@ class Perturbed:
         if self.bias is not None:
             self.bias_noise = None
 
-    def set_grad(self, weights):
+    def set_grad(self, weights, l1=0, l2=0):
         self.weight.grad = (weights @ self.weight_noise.view(self.directions, -1)).view(*self.weight.size())
         if self.bias is not None:
             self.bias.grad = weights @ self.bias_noise
+        if l1:
+            self.weight.grad += l1 * torch.sign(self.weight)
+        if l2:
+            self.weight.grad += l2 * self.weight
         self.free_memory()
 
 
@@ -327,7 +331,7 @@ class PermutedLinear(nn.Linear, Permuted):
             return add
         return unperturbed
 
-    def set_grad(self, weights):
+    def set_grad(self, weights, l1=0, l2=0):
         permutation_weights = self.get_permutation_weights(weights)
         if self.permute_inputs and self.permute_outputs:
             self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(-1, 1)).reshape(self.out_features, self.in_features)
@@ -337,6 +341,10 @@ class PermutedLinear(nn.Linear, Permuted):
             self.weight.grad = torch.mm(permutation_weights, self.weight_noise)
         if self.bias is not None:
             self.bias.grad = weights @ self.bias_noise
+        if l1:
+            self.weight.grad += l1 * torch.sign(self.weight)
+        if l2:
+            self.weight.grad += l2 * self.weight
 
 
 class PermutedConv2d(nn.Conv2d, Permuted):
@@ -386,7 +394,7 @@ class PermutedConv2d(nn.Conv2d, Permuted):
             return add
         return unperturbed
 
-    def set_grad(self, weights):
+    def set_grad(self, weights, l1=0, l2=0):
         permutation_weights = self.get_permutation_weights(weights)
         if self.permute_inputs and self.permute_outputs:
             sp_size = self.out_sparsity * self.in_sparsity
@@ -398,7 +406,10 @@ class PermutedConv2d(nn.Conv2d, Permuted):
             self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(self.out_sparsity,-1)).view_as(self.weight)
         if self.bias is not None:
             self.bias.grad = weights @ self.bias_noise
-
+        if l1:
+            self.weight.grad += l1 * torch.sign(self.weight)
+        if l2:
+            self.weight.grad += l2 * self.weight
 
         self.free_memory()
 
@@ -425,6 +436,6 @@ class SparsePerturbedLinear(nn.Linear, SparsePerturbed):
             return add
         return unperturbed
 
-    def set_grad(self, weights):
+    def set_grad(self, weights, l1=0, l2=0):
         raise NotImplementedError
 

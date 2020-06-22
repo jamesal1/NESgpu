@@ -45,9 +45,8 @@ class Binarized(Perturbed, nn.Module):
         with torch.no_grad():
             self.weight.bernoulli_()
             self.weight -= .5
-            self.weight *= 3e-3
             if self.threshold:
-                self.bias.fill_(self.in_degree / 2)
+                self.bias.fill_(0)
 
 
     def set_noise(self, noise_scale=None):
@@ -55,18 +54,20 @@ class Binarized(Perturbed, nn.Module):
             self.set_seed()
         if noise_scale is not None:
             self.set_noise_scale(noise_scale)
-        print(torch.sigmoid(self.weight / self.noise_scale))
-        self.weight_noise = booleanOperations.sample_bits(torch.sigmoid(self.weight / self.noise_scale), self.directions, self.dtype, self.seed)
+        print(torch.sigmoid(self.weight.abs()).mean())
+        self.weight_noise = booleanOperations.sample_bits(torch.sigmoid(self.weight), self.directions, self.dtype, self.seed)
         self.bias_noise = self.bias + (torch.rand(size=(self.directions, self.out_degree), dtype=torch.float16,
                                                   device=self.weight.device) - .5) * self.noise_scale
 
 
-    def set_grad(self, weights):
-        pass
-        # print(weights.device)
+    def set_grad(self, weights, l1=1e-5, l2=1e-5):
         weights = weights.type(torch.float16)
         weights = (weights - weights.mean())
         self.weight.grad = booleanOperations.weighted_sum(self.weight_noise, weights, self.in_degree)
+        if l1:
+            self.weight.grad += l1 * torch.sign(self.weight)
+        if l2:
+            self.weight.grad += l2 * self.weight
         self.bias.grad = weights @ self.bias_noise
 
 
@@ -87,7 +88,7 @@ class BinarizedLinear(Binarized):
             packed_input = booleanOperations.pack(input, self.dtype) if input.dtype == torch.bool else input
 
             activation = booleanOperations.bmm(self.weight_noise, packed_input.view(self.directions, -1, 1)).squeeze(dim=2)
-            return activation > self.bias_noise if self.threshold else activation
+            return (2 * activation > (self.bias_noise + self.in_features)) if self.threshold else 2 * activation - self.in_features
 
             # if self.threshold:
             #     return booleanOperations.bmm_act(self.weight_noise, packed_input.view(self.directions, -1, 1), self.bias_noise).squeeze(dim=2)
@@ -126,17 +127,17 @@ class BinarizedConv2d(Binarized):
         self.weight_noise_reshaped = self.weight_noise_reshaped.permute([0, 2, 3, 4, 1]).view(self.directions, -1, self.out_channels).contiguous()
 
     def forward(self, input):
-        print(input.shape,self.bias_noise.shape)
         if self.perturbed_flag:
             if input.dtype == torch.bool:
                 packed_input = booleanOperations.pack(input.view(-1, self.in_channels), self.dtype).view(*input.shape[:3], -1)
             else:
                 packed_input = input
+            offset = self.in_channels * self.kernel_size[0] * self.kernel_size[1]
             if self.threshold:
-                return booleanOperations.conv_act(packed_input, self.weight_noise_reshaped, self.bias_noise, *self.kernel_size,
+                return booleanOperations.conv_act(packed_input, self.weight_noise_reshaped, self.bias_noise.type(torch.int32) + offset, *self.kernel_size,
                                                   self.padding, self.padding, self.stride, self.stride)
-            return booleanOperations.conv(packed_input, self.weight_noise_reshaped, *self.kernel_size,
-                                          self.padding, self.padding, self.stride, self.stride)
+            return 2 * booleanOperations.conv(packed_input, self.weight_noise_reshaped, *self.kernel_size,
+                                          self.padding, self.padding, self.stride, self.stride) - offset
         else:
             raise NotImplementedError
 

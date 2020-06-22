@@ -44,7 +44,7 @@ kernels = {}
 
 
 
-for file in "batch_im2col,bmm,bmmT,bmm_act,pack,int8pack,weighted_sum,max_pool2d".split(","):
+for file in "batch_im2col,bmm,bmm_act,pack,int8pack,weighted_sum,max_pool2d".split(","):
     with open("extensions/src/{}.cu".format(file)) as f:
         text = f.read()
         kernels[file] = KernelWrapper(text, file+"_kernel")
@@ -135,6 +135,7 @@ def bmm_act(A,B, threshold):
     assert(A.size(0) == B.size(0) == threshold.size(0))
     assert(A.size(2) == B.size(1))
     assert(threshold.size(1) == B.size(2))
+    assert(threshold.dtype == torch.int32)
     BLOCK_SIZE = 8
     MULT_A = 4
     MULT_B = 4
@@ -156,25 +157,6 @@ def bmm_act(A,B, threshold):
     # cp.cuda.stream.get_current_stream().synchronize()
     return torch.as_tensor(C, device=A.device)
 
-def bmmT(A,B):
-    BLOCK_SIZE = 16
-    MULT_A = 4
-    MULT_B = 4
-    C = cp.empty((A.size(0), A.size(1), B.size(1)), dtype=cp.int32)
-    threadsx = BLOCK_SIZE
-    threadsy = BLOCK_SIZE
-    threadsz = 1
-    block = threadsx, threadsy, threadsz
-    grid = ceil_div(C.shape[2], threadsx * MULT_B), ceil_div(C.shape[1], threadsy * MULT_A), ceil_div(C.shape[0], threadsz)
-    kernels["bmmT"][A.dtype,("BLOCK_SIZE",BLOCK_SIZE),("MULT_A", MULT_A),("MULT_B", MULT_B)](grid, block, args=[
-        C,
-        A.data_ptr(),
-        B.data_ptr(),
-        *C.shape[1:],
-        *A.shape[1:],
-        *B.shape[1:]
-    ],stream=torch_stream)
-    return torch.as_tensor(C, device=A.device)
 
 
 def conv(input, filter, filterx, filtery, padx, pady, stridex, stridey):
@@ -189,9 +171,6 @@ def conv_act(input, filter, threshold, filterx, filtery, padx, pady, stridex, st
     cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
     return bmm_act(cols, filter, threshold).view(input.size(0),h,w, -1)
 
-def conv_bmmT(input, filter, filterx, filtery, padx, pady, stridex, stridey):
-    cols = batch_im2col(input, filterx, filtery, padx, pady, stridex, stridey)
-    return bmmT(cols, filter)
 
 def pack(input, dtype=torch.int32):
     assert(len(input.shape)==2)

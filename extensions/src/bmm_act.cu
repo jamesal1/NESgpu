@@ -45,16 +45,15 @@ __global__ void bmm_act_kernel(bool *C,
         }
         __syncthreads();
     }
-    #pragma unroll
+//    #pragma unroll
     for (int a = 0; a < MULT_A; a++) {
         const int x_cor = x + a * BLOCK_SIZE;
         if (x_cor < C1) {
-            #pragma unroll
+//            #pragma unroll
             for (int b = 0; b < MULT_B; b++) {
                   const int y_cor = y + b * BLOCK_SIZE;
                   if (y_cor < C2) {
-//                    C[(z * C1 + x_cor) * C2 + y_cor] = tmp[a * MULT_B + b] > thresh[z * B2 + y_cor]; // doesn't look like there will be a significant improvement by caching thresh
-                    C[(z * C1 + x_cor) * C2 + y_cor] = tmp[a * MULT_B + b] > 5; // doesn't look like there will be a significant improvement by caching thresh
+                    C[(z * C1 + x_cor) * C2 + y_cor] = 2 * tmp[a * MULT_B + b] > thresh[z * B2 + y_cor]; // doesn't look like there will be a significant improvement by caching thresh
                  }
 
             }

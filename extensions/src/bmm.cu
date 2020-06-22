@@ -27,6 +27,7 @@ __global__ void bmm_kernel(int *C,
         for (int i = 0; i < MULT_B; i++) {
             Bsub[i][x_sub][y_sub] = (x_sub + inner < A2 && y + i * BLOCK_SIZE < B2) ? B[(z * B1 + x_sub + inner) * B2 + y + i * BLOCK_SIZE] : 0;
         }
+        __syncthreads();
 
         #pragma unroll
         for (int a = 0; a < MULT_A; a++) {

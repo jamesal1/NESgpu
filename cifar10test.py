@@ -101,7 +101,8 @@ class Trainer():
                     pred = perturbed_model.forward(data)
                     # continue
                     # print(pred)
-                    reward = torch.nn.NLLLoss(reduce=False)(pred, target)
+                    # reward = torch.nn.NLLLoss(reduce=False)(pred, target)
+                    reward = torch.nn.CrossEntropyLoss(reduction="none")(torch.ones_like(pred), target)
                     result = reward - reward.mean()
                     # step_size = result / ((ave_delta + 1e-5) * self.noise_scale)
                     step_size = result
@@ -121,7 +122,6 @@ class Trainer():
             #
             #     print(param.data.abs().mean())
             print("Average Reward:", total_reward / self.batches_per_epoch)
-            # print("Average Game Length:", total_game_length.float() / (self.batches_per_epoch * self.batch_size))
             fname = os.path.join(self.checkpoints_dir, "epoch_"+str(epoch)+".pkl")
             perturbed_model.free_memory()
             torch.save(self.model, fname)

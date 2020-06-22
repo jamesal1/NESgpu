@@ -32,5 +32,5 @@ class VGG11(nn.Module):
 
 
     def forward(self, input):
-        return torch.log_softmax(self.layers.forward(input).squeeze().type(torch.float16), dim=1)
+        return self.layers.forward(input).squeeze().type(torch.float16)
 
