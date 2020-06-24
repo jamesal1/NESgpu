@@ -43,8 +43,10 @@ class Binarized(Perturbed, nn.Module):
 
     def reset_parameters(self):
         with torch.no_grad():
-            self.weight.bernoulli_()
-            self.weight -= .5
+            self.weight.fill_(0)
+            # self.weight.bernoulli_()
+            # self.weight -= .5
+            # self.weight *= 1e-3
             if self.threshold:
                 self.bias.fill_(0)
 
@@ -54,16 +56,20 @@ class Binarized(Perturbed, nn.Module):
             self.set_seed()
         if noise_scale is not None:
             self.set_noise_scale(noise_scale)
-        print(torch.sigmoid(self.weight.abs()).mean())
-        self.weight_noise = booleanOperations.sample_bits(torch.sigmoid(self.weight), self.directions, self.dtype, self.seed)
-        self.bias_noise = self.bias + (torch.rand(size=(self.directions, self.out_degree), dtype=torch.float16,
-                                                  device=self.weight.device) - .5) * self.noise_scale
+        norm_weight = self.weight / (self.weight.abs().mean() + 1e-5) * 5
+        P = torch.sigmoid(norm_weight)
+        # print(torch.sigmoid(norm_weight.abs()).mean())
+        self.weight_noise = booleanOperations.sample_bits(P, self.directions, self.dtype, self.seed)
+        self.bias_noise = (torch.rand(size=(self.directions, self.out_degree), dtype=torch.float16,
+                                                  device=self.weight.device) - .5) * 2
 
 
-    def set_grad(self, weights, l1=1e-5, l2=1e-5):
+    def set_grad(self, weights, l1=0, l2=1e-3):
         weights = weights.type(torch.float16)
         weights = (weights - weights.mean())
         self.weight.grad = booleanOperations.weighted_sum(self.weight_noise, weights, self.in_degree)
+        # print("grad",self.weight.grad.abs().mean())
+        # print("weight", self.weight.abs().mean())
         if l1:
             self.weight.grad += l1 * torch.sign(self.weight)
         if l2:
@@ -73,13 +79,14 @@ class Binarized(Perturbed, nn.Module):
 
 class BinarizedLinear(Binarized):
 
-    def __init__(self, in_features, out_features,  directions, threshold=True, dtype=torch.int64, device="cuda"):
+    def __init__(self, in_features, out_features,  directions, threshold=True, batch_norm=True, dtype=torch.int64, device="cuda"):
         Binarized.__init__(self,in_features, out_features,  directions, threshold, dtype, device)
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(torch.zeros(out_features, in_features, dtype=torch.float16, device=device))
         if threshold:
             self.bias = Parameter(torch.zeros(out_features, dtype=torch.float16,device=device))
+        self.batch_norm = batch_norm
         self.reset_parameters()
 
 
@@ -87,8 +94,13 @@ class BinarizedLinear(Binarized):
         if self.perturbed_flag:
             packed_input = booleanOperations.pack(input, self.dtype) if input.dtype == torch.bool else input
 
-            activation = booleanOperations.bmm(self.weight_noise, packed_input.view(self.directions, -1, 1)).squeeze(dim=2)
-            return (2 * activation > (self.bias_noise + self.in_features)) if self.threshold else 2 * activation - self.in_features
+            activation = 2 * booleanOperations.bmm(self.weight_noise, packed_input.view(self.directions, -1, 1)).squeeze(dim=2) - self.in_features
+            if self.threshold:
+                thresh = (self.bias + self.bias_noise)
+                if self.batch_norm:
+                    thresh += activation.type(torch.float16).mean(dim=0, keepdim=True)
+                return activation > thresh
+            return activation
 
             # if self.threshold:
             #     return booleanOperations.bmm_act(self.weight_noise, packed_input.view(self.directions, -1, 1), self.bias_noise).squeeze(dim=2)
@@ -101,7 +113,7 @@ class BinarizedConv2d(Binarized):
 
     def __init__(self,in_channels, out_channels,  directions, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 threshold=True, padding_mode='zeros', dtype=torch.int64, device="cuda"):
+                 threshold=True, batch_norm=True, padding_mode='zeros', dtype=torch.int64, device="cuda"):
         Binarized.__init__(self,in_channels, out_channels,  directions, threshold, dtype, device)
         if dilation != 1 or groups != 1 or padding_mode != "zeros":
             raise NotImplementedError
@@ -113,6 +125,7 @@ class BinarizedConv2d(Binarized):
         self.weight = Parameter(torch.zeros(out_channels * self.kernel_size[0] * self.kernel_size[1], in_channels, dtype=torch.float16, device=device))
         if threshold:
             self.bias = Parameter(torch.zeros(out_channels, dtype=torch.float16, device=device))
+        self.batch_norm = batch_norm
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -134,7 +147,14 @@ class BinarizedConv2d(Binarized):
                 packed_input = input
             offset = self.in_channels * self.kernel_size[0] * self.kernel_size[1]
             if self.threshold:
-                return booleanOperations.conv_act(packed_input, self.weight_noise_reshaped, self.bias_noise.type(torch.int32) + offset, *self.kernel_size,
+                if self.batch_norm:
+
+                    activation = 2 * booleanOperations.conv(packed_input, self.weight_noise_reshaped, *self.kernel_size,
+                                                            self.padding, self.padding, self.stride, self.stride) - offset
+                    thresh = self.bias + self.bias_noise + activation.type(torch.float16).mean(dim=[1,2])
+                    # print(activation.shape, thresh.shape)
+                    return activation > thresh.unsqueeze(1).unsqueeze(1)
+                return booleanOperations.conv_act(packed_input, self.weight_noise_reshaped, (self.bias + self.bias_noise).type(torch.int32) + offset, *self.kernel_size,
                                                   self.padding, self.padding, self.stride, self.stride)
             return 2 * booleanOperations.conv(packed_input, self.weight_noise_reshaped, *self.kernel_size,
                                           self.padding, self.padding, self.stride, self.stride) - offset

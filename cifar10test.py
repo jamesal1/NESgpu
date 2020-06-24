@@ -51,8 +51,8 @@ class Trainer():
         self.model.batch_size = self.batch_size
         perturbed_model = base.PerturbedModel(self.model, self.directions)
         ave_delta = .005 * self.batch_size
-        opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
-        # opt = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        # opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
+        opt = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
         # train_loader = torch.utils.data.DataLoader(
         #     datasets.MNIST('../data', train=True, download=True,
@@ -88,9 +88,7 @@ class Trainer():
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.cuda()
                 data = (data * 255).type(torch.int8)
-
                 data = booleanOperations.int8pack(data.permute([0, 2, 3, 1]).contiguous().view(-1, 3), dtype=torch.int32).view(-1, 32, 32, 1)
-                print(data.shape)
                 target = target.cuda()
                 with torch.no_grad():
                     perturbed_model.set_seed()
@@ -102,14 +100,14 @@ class Trainer():
                     # continue
                     # print(pred)
                     # reward = torch.nn.NLLLoss(reduce=False)(pred, target)
-                    reward = torch.nn.CrossEntropyLoss(reduction="none")(torch.ones_like(pred), target)
+                    reward = torch.nn.CrossEntropyLoss(reduction="none")(pred, target)
                     result = reward - reward.mean()
                     # step_size = result / ((ave_delta + 1e-5) * self.noise_scale)
                     step_size = result
                     # ave_delta = self.ave_delta_rate * ave_delta + (1 - self.ave_delta_rate) * (result.norm(p=1))
                     perturbed_model.set_grad(step_size)
                     total_reward += reward.mean()
-                print(reward.mean())
+                print("reward",reward.mean())
                 # (torch.nn.NLLLoss()(self.model.forward(data),target)).backward()
 
                 # for param in self.model.parameters():
