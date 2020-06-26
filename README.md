@@ -1,5 +1,5 @@
 # NESgpu
-Optimized PyTorch GPU implementation of Natural Evolution Strategies/Augmented Random Search (Documentation for Binary Neural Network Layers coming soon!)
+Optimized PyTorch GPU implementation of Natural Evolution Strategies/Augmented Random Search
 
 NESgpu defines the Perturbed class, which streamlines the noise sampling and weight update process for NES and similar training algorithms. It directly allows for batch training, obtaining performance gains of **2-100x** (see below) over non-batched implementations.
 
