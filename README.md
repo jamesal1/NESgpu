@@ -3,6 +3,8 @@ Optimized PyTorch GPU implementation of Natural Evolution Strategies/Augmented R
 
 NESgpu defines the Perturbed class, which streamlines the noise sampling and weight update process for NES and similar training algorithms. It directly allows for batch training, obtaining performance gains of **2-100x** (see below) over non-batched implementations.
 
+NESgpu also contains efficient implementations for batch binary multiplication and convolution. However, some basic tests show that binary neural networks are not easily trained using NES.
+
 ## Currently Defined Layers
 
 PerturbedLinear/PerturbedConv2d is the "default" implementation which adds Gaussian noise to its weights. Large amounts of memory are needed to store the Gaussian noise.
