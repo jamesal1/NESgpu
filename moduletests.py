@@ -177,7 +177,7 @@ def time_forward_median(layer, input, times, repeat=1):
         results += [time.time() - start]
     return 1000 * sorted(results)[times//2]
 
-def test_linear(device="cuda", batch_size=1024, times=100):
+def test_linear(device="cuda", batch_size=1024, times=200):
     ret = defaultdict(lambda:dict())
     for test in [(256, 256), (512, 512), (1024, 1024)]:
         output_dim, input_dim = test
@@ -187,26 +187,35 @@ def test_linear(device="cuda", batch_size=1024, times=100):
         plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device)
         pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device)
         plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
+        nlo = SyntheticLinear(input_dim, output_dim, batch_size, flip="out").to(device)
+        nli = SyntheticLinear(input_dim, output_dim, batch_size, flip="in").to(device)
+        nlb = SyntheticLinear(input_dim, output_dim, batch_size, flip="both").to(device)
         splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.99).to(device)
         spli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.5).to(device)
         spli2 = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1).to(device)
         splb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device)
-        for layer, name in [(l, "PerturbedLinear"),
-                            (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"),
-                            (pli, "PermutedLinear"),
-                            (spli, "PermutedLinear(in_sparsity=.5)"),
-                            (spli2, "PermutedLinear(in_sparsity=.1)")
-                            ]:
-            layer.allocate_memory()
-            layer.set_noise_scale(1.)
-            layer.set_seed()
-            layer.set_noise()
+        if device == "cuda":
+            for layer, name in [(l, "PerturbedLinear"),
+                                (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"),
+                                (pli, "PermutedLinear"),
+                                (plo, "PermutedLinearOut"),
+                                (nli, "SyntheticLinear"),
+                                (nlo, "SyntheticLinearOut"),
+                                (nlb, "SyntheticLinearBoth"),
+                                (spli, "PermutedLinear(in_sparsity=.5)"),
+                                (spli2, "PermutedLinear(in_sparsity=.1)")
+                                ]:
+                layer.allocate_memory()
+                layer.set_noise_scale(1.)
+                layer.set_seed()
+                layer.set_noise()
 
-            layer.perturbed_flag = True
+                layer.perturbed_flag = True
 
-            inp = torch.rand(batch_size, input_dim, device=device)
-            ret[str(test)][name] = time_forward_median(layer, inp, times)
+                inp = torch.rand(batch_size, input_dim, device=device)
+                ret[str(test)][name] = time_forward_median(layer, inp, times)
         l.perturbed_flag = False
+        inp = torch.rand(batch_size, input_dim, device=device)
         ret[str(test)]["Base"] = time_forward_median(l, inp, times)
         ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
     return ret
@@ -224,10 +233,16 @@ def test_conv(device="cuda", batch_size=1024, times=100):
         plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out").to(device)
         pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in").to(device)
         plb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both").to(device)
+        nli = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="in").to(device)
+        nlo = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="out").to(device)
+        nlb = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="both").to(device)
         splo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.5).to(device)
         splo2 = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.1).to(device)
         splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device)
         for layer, name in [(l, "PerturbedConv2d"), (plo, "PermutedConv2d"),
+                            (nli, "SyntheticConv2dIn"),
+                            (nlo, "SyntheticConv2dOut"),
+                            (nlb, "SyntheticConv2dBoth"),
                              (splo, "PermutedConv2d(out_sparsity=.5)"),
                              (splo2, "PermutedConv2d(out_sparsity=.1)")
                             ]:
@@ -272,17 +287,76 @@ def to_markdown(result_dict):
 
 
 
+def index_select_vs_gather(device="cuda", size=(1024, 1024), times=100):
+    permutations = torch.empty(size, dtype=torch.long, device=device)
+    target = torch.arange(size[0] * size[1], device=device).view(*size)
+    target_f32 = torch.arange(size[0] * size[1], device=device).view(*size).type(torch.float)
+    target_f32b = torch.arange(size[0] * size[1], device=device).view(*size).type(torch.float)
+    target_f16 = torch.arange(size[0] * size[1], device=device).view(*size).type(torch.float16)
+    target_i8 = torch.arange(size[0] * size[1], device=device).view(*size).type(torch.int8)
+    permutations_1d = (permutations + (torch.arange(size[0], device=device) * size[1]).unsqueeze(1)).flatten()
+    for i in range(size[0]):
+        torch.randperm(size[1], out=permutations[i])
+    for _ in range(10):
+        torch.cuda.synchronize()
+        start =time.time()
+        for _ in range(times):
+            perms_1 = target.gather(1, permutations)
+        torch.cuda.synchronize()
+        print("gather", time.time() - start)
+        torch.cuda.synchronize()
+        start = time.time()
+        for _ in range(times):
+            perms_2 = torch.index_select(target.flatten(), 0, permutations_1d)
+        torch.cuda.synchronize()
+        print("select", time.time() - start)
+        start = time.time()
+        for _ in range(times):
+            # perms_2 = torch.index_select(target.view(size[0],size[1]), 0, permutations[0])
+            perms_2 = target.view(size[0],size[1])[permutations[0]]
+        torch.cuda.synchronize()
+        print("select_simple", time.time() - start)
+        torch.cuda.synchronize()
+        start = time.time()
+        for _ in range(times):
+            flip_1 = target_f32 * target_f32b
+        torch.cuda.synchronize()
+        print("32", time.time() - start)
+        torch.cuda.synchronize()
+        start = time.time()
+        for _ in range(times):
+            flip_1 = target_f32 * target_f32b
+        torch.cuda.synchronize()
+        print("32", time.time() - start)
+        torch.cuda.synchronize()
+        start = time.time()
+        for _ in range(times):
+            flip_1 = target_f32 * target_f16
+        torch.cuda.synchronize()
+        print("16", time.time() - start)
+        torch.cuda.synchronize()
+        start = time.time()
+        for _ in range(times):
+            flip_1 = target_f32 * target_i8
+        torch.cuda.synchronize()
+        print("8", time.time() - start)
+
+
+
+
 if __name__ == "__main__":
     with torch.no_grad():
         pass
-        # speed_test_linear("cuda")
+        # index_select_vs_gather(size=(1024, 256))
+        # torch.set_num_threads(1)
+        # print(test_linear("cpu", batch_size=10))
         # speed_test_conv("cuda")
         # lin_vs_conv("cpu")
         # randperm_speed("cuda")
         # sparse_test("cuda")
         # test_perm_conv("cuda")
         # to_markdown(test_linear("cuda"))
-        to_markdown(test_linear("cuda"))
+        # to_markdown(test_linear("cuda"))
         to_markdown(test_conv("cuda"))
         # test_linear("cuda")
         # test_add("cuda")

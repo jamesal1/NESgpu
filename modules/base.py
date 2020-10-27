@@ -47,10 +47,8 @@ class Perturbed:
         self.directions = directions
         self.perturbed_flag = False
         self.noise_scale = None
-        self.weight_noise = None
         self.seed = None
-        if bias:
-            self.bias_noise = None
+        self.free_memory()
 
     def set_noise_scale(self, noise_scale):
         self.noise_scale = noise_scale
@@ -124,8 +122,6 @@ class Permuted(Perturbed):
         else:
             print("Permutation setting not recognized")
             raise NotImplementedError
-        self.input_permutations = None
-        self.output_permutations = None
         self.in_degree = in_degree
         self.out_degree = out_degree
         self.in_sparsity = int(in_sparsity * self.in_degree) if isinstance(in_sparsity, float) else in_sparsity
@@ -209,6 +205,88 @@ class Permuted(Perturbed):
             weighted_perms.put_(output_permutations_1d,weights.view(-1,1).expand(self.directions, self.out_degree), accumulate=True)
             weighted_perms = weighted_perms[:, :self.out_sparsity]
         return weighted_perms
+
+class Synthetic(Perturbed):
+
+    def __init__(self, in_degree, out_degree, directions, bias=True, flip="auto", in_sparsity=0, out_sparsity=0):
+        Perturbed.__init__(self, directions, bias)
+        if flip == "auto":
+            if 1 < in_degree < 32 and 1 < out_degree < 32:
+                flip = "both"
+            elif in_degree > out_degree:
+                flip = "in"
+            else:
+                flip = "out"
+        if flip == "both":
+            self.flip_inputs = True
+            self.flip_outputs = True
+        elif flip == "in":
+            self.flip_inputs = True
+            self.flip_outputs = False
+        elif flip == "out":
+            self.flip_inputs = False
+            self.flip_outputs = True
+        else:
+            print("Flip setting not recognized")
+            raise NotImplementedError
+        self.in_degree = in_degree
+        self.out_degree = out_degree
+        if in_sparsity or out_sparsity:
+            raise NotImplementedError("Sparsity is not efficient for synthetic sampling, use permuted sampling instead")
+        self.in_sparsity = self.in_degree
+        self.out_sparsity = self.out_degree
+
+    def allocate_weight(self):
+        self.weight_noise = torch.empty(self.out_sparsity, self.in_sparsity, *self.weight.shape[2:],
+                                        device=self.weight.device, dtype=self.weight.dtype)
+
+    def free_memory(self):
+        Perturbed.free_memory(self)
+        self.input_flips = None
+        self.output_flips = None
+
+
+    def set_noise(self, noise_scale=None):
+        if self.seed is None:
+            self.set_seed()
+        if noise_scale is not None:
+            self.set_noise_scale(noise_scale)
+        if self.weight_noise is None:
+            self.allocate_memory()
+        gen = torch.cuda.manual_seed(self.seed)
+        rescale = (self.out_degree * self.in_degree / self.out_sparsity / self.in_sparsity) ** .5
+        self.weight_noise.normal_(std=self.noise_scale * rescale, generator=gen)
+        if self.bias is not None:
+            self.bias_noise.normal_(std=self.noise_scale, generator=gen)
+        if self.flip_outputs:
+            self.output_flips = 2 * torch.randint(2, size=(self.directions, self.out_degree), dtype=torch.uint8,
+                                                  generator=gen, device=self.weight.device) - 1
+        if self.flip_inputs:
+            self.input_flips = 2 * torch.randint(2, size=(self.directions, self.in_degree), dtype=torch.uint8,
+                                                 generator=gen, device=self.weight.device) - 1
+
+    def get_flipped_weights(self, weights):
+        if self.flip_inputs and self.flip_outputs:
+            return torch.einsum("da,db->ab", weights, self.output_flips, self.input_flips * weights.unsqueeze(1))
+        elif self.flip_inputs:
+            return (self.input_flips * weights.unsqueeze(1)).sum(dim=0)
+        else:
+            return (self.output_flips * weights.unsqueeze(1)).sum(dim=0)
+
+    def set_grad(self, weights, l1=0, l2=0):
+        if self.permute_inputs and self.permute_outputs:
+            flipped_weights = torch.einsum("da,db->ab", weights, self.output_flips, self.input_flips * weights.unsqueeze(1))
+            self.weight.grad = flipped_weights * self.weight_noise
+        elif self.permute_inputs:
+            self.weight.grad = (self.input_flips * weights.unsqueeze(1)).sum(dim=0).unsqueeze(1) * self.weight_noise
+        else:
+            self.weight.grad = (self.output_flips * weights.unsqueeze(1)).sum(dim=0) * self.weight_noise
+        if self.bias is not None:
+            self.bias.grad = weights @ self.bias_noise
+        if l1:
+            self.weight.grad += l1 * torch.sign(self.weight)
+        if l2:
+            self.weight.grad += l2 * self.weight
 
 
 class SparsePerturbed(Perturbed):
@@ -412,6 +490,66 @@ class PermutedConv2d(nn.Conv2d, Permuted):
             self.weight.grad += l2 * self.weight
 
         self.free_memory()
+
+class SyntheticLinear(nn.Linear, Synthetic):
+
+    def __init__(self, in_features, out_features, directions, bias=True, flip="auto", in_sparsity=0, out_sparsity=0):
+        nn.Linear.__init__(self, in_features, out_features, bias)
+        Synthetic.__init__(self, in_features, out_features, directions, bias=bias,
+                           flip=flip, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
+
+
+    def forward(self, input):
+        unperturbed = F.linear(input, self.weight, self.bias)
+        if self.perturbed_flag:
+            input_view = input.view(-1, self.directions, self.in_features)
+            repeat_size = input_view.size(0)
+            flipped_input = input_view * self.input_flips if self.flip_inputs else input_view
+            perturbations = flipped_input @ self.weight_noise.t()
+            flipped_output = (perturbations * self.output_flips if self.flip_outputs else perturbations)
+            if self.bias is not None:
+                flipped_output += self.bias_noise
+            flipped_output[(repeat_size + 1) // 2:] *= -1
+            add = unperturbed + flipped_output
+            return add
+        return unperturbed
+
+
+class SyntheticConv2d(nn.Conv2d, Synthetic):
+
+    def __init__(self, in_channels, out_channels, kernel_size, directions, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=True, padding_mode='zeros', flip="auto", in_sparsity=0, out_sparsity=0):
+        nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, padding_mode)
+        Synthetic.__init__(self, in_channels, out_channels, directions, bias=bias,
+                          flip=flip, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
+
+    def forward(self, input):
+        if self.padding_mode != 'zeros':
+            input = F.pad(input, self._padding_repeated_twice, mode=self.padding_mode)
+            padding = module_utils._pair(0)
+        else:
+            padding = self.padding
+        unperturbed = F.conv2d(input, self.weight, self.bias, self.stride,
+                               padding, self.dilation, self.groups)
+
+        if self.perturbed_flag:
+            input_dims = input.shape[-2:]
+            output_dims = unperturbed.shape[-2:]
+            input_view = input.view(-1, self.directions, self.in_channels, *input_dims)
+            repeat_size = input_view.size(0)
+            flipped_input = input_view * self.input_flips.unsqueeze(2).unsqueeze(3) if self.flip_inputs else input_view
+            perturbations = F.conv2d(flipped_input.view(-1, self.in_sparsity, *input_dims), self.weight_noise, None, self.stride,
+                                         padding, self.dilation, self.groups)
+            flipped_output = (perturbations * self.output_flips.unsqueeze(2).unsqueeze(3) if self.flip_outputs else perturbations)
+            if self.bias is not None:
+                flipped_output += self.bias_noise.unsqueeze(-1).unsqueeze(-1)
+            flipped_output.view(repeat_size, -1)[(repeat_size + 1) // 2:] *= -1
+            add = unperturbed + flipped_output
+            return add
+        return unperturbed
+
+
 
 
 class SparsePerturbedLinear(nn.Linear, SparsePerturbed):
