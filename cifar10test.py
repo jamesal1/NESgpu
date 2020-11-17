@@ -105,7 +105,7 @@ class Trainer():
                     # step_size = result / ((ave_delta + 1e-5) * self.noise_scale)
                     step_size = result
                     # ave_delta = self.ave_delta_rate * ave_delta + (1 - self.ave_delta_rate) * (result.norm(p=1))
-                    perturbed_model.set_grad(step_size)
+                    perturbed_model.update(step_size)
                     total_reward += reward.mean()
                 print("reward",reward.mean())
                 # (torch.nn.NLLLoss()(self.model.forward(data),target)).backward()
@@ -129,12 +129,13 @@ class Trainer():
 
 
 if __name__ == "__main__":
-    batch_size = 2 ** 8
+    batch_size = 2 ** 12
     directions = batch_size
     # t = torch.zeros( int(1.5 * 2 ** 30), device="cuda")
     # my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
     # my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
-    my_model = models.VGG11(directions=directions, action_size=10, in_channels=24)
+    # my_model = models.VGG11(directions=directions, action_size=10, in_channels=24)
+    my_model = models.SmallNet(directions=directions, action_size=10, in_channels=24)
     # Trainer(model.TransformerNet()).train()
     Trainer(my_model, batch_size=batch_size, directions=directions).train()
 

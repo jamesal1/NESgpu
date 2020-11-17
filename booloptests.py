@@ -229,11 +229,11 @@ def speed_conv():
     repeat = 3
 
     for batch_dim, out_dim, in_dim, filter_size, input_size, padding, stride in \
-        [(2 ** 8, 64, 24, 7, 224, 3, 2),
+        [(2 ** 7, 64, 24, 7, 224, 3, 2),
         # (2 ** 8, 64, 64, 3, 56, 1, 1),
         # (2 ** 8, 128, 128, 3, 28, 1, 1),
         # (2 ** 8, 256, 256, 3, 14, 1, 1),
-        (2 ** 8, 512, 512, 3, 7, 1, 1)]:
+        (2 ** 7, 512, 512, 3, 7, 1, 1)]:
         # (2 ** 7, 128, 2048, 3, 7, 1, 1)]:
         print(batch_dim, out_dim, in_dim, filter_size, input_size, padding, stride)
 
@@ -334,6 +334,6 @@ def speed_conv():
             print(time_function(maxpool2d_naive,input.view(batch_dim,input_size,input_size,in_dim)))
 
 
-check_result()
+# check_result()
 # speedtests()
-# speed_conv()
+speed_conv()

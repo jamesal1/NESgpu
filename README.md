@@ -102,6 +102,6 @@ All classes/layers can be found in modules.py.
     
     3.2 Using torch.no_grad(), calculate the training loss. The batch size should be an even multiple of the population size for antithetic sampling, in which case the input should be in the shape of (repeat_size, directions, ...), and the second half of the repeats will use the negated noise vector. The batch size can also be set to be equal to the population size, in which case antithetic sampling will not be used.
     
-    3.3 Calculate the update weights as desired, then call perturbed_model.set_grad(weights), then step the optimizer.
+    3.3 Calculate the update weights as desired, then call perturbed_model.update(weights), then step the optimizer.
     
 4. Before saving the model, call perturbed_model.free_memory() to delete all noise tensors.

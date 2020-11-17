@@ -31,7 +31,7 @@ class ExtractBits(nn.Module):
 
 class Binarized(Perturbed, nn.Module):
 
-    def __init__(self, in_degree, out_degree,  directions, threshold=True, dtype=torch.int64, device="cuda"):
+    def __init__(self, in_degree, out_degree,  directions, threshold=False, dtype=torch.int64, device="cuda"):
         nn.Module.__init__(self)
         Perturbed.__init__(self, directions, threshold)
         self.in_degree = in_degree
@@ -57,14 +57,14 @@ class Binarized(Perturbed, nn.Module):
         if noise_scale is not None:
             self.set_noise_scale(noise_scale)
         norm_weight = self.weight / (self.weight.abs().mean() + 1e-5) * 5
-        P = torch.sigmoid(norm_weight)
+        P = torch.sigmoid(norm_weight.float()).half()
         # print(torch.sigmoid(norm_weight.abs()).mean())
         self.weight_noise = booleanOperations.sample_bits(P, self.directions, self.dtype, self.seed)
         self.bias_noise = (torch.rand(size=(self.directions, self.out_degree), dtype=torch.float16,
-                                                  device=self.weight.device) - .5) * 2
+                                                  device=self.weight.device) - .5) * 6
 
 
-    def set_grad(self, weights, l1=0, l2=1e-3):
+    def update(self, weights, l1=0, l2=1e-3):
         weights = weights.type(torch.float16)
         weights = (weights - weights.mean())
         self.weight.grad = booleanOperations.weighted_sum(self.weight_noise, weights, self.in_degree)
@@ -79,7 +79,7 @@ class Binarized(Perturbed, nn.Module):
 
 class BinarizedLinear(Binarized):
 
-    def __init__(self, in_features, out_features,  directions, threshold=True, batch_norm=True, dtype=torch.int64, device="cuda"):
+    def __init__(self, in_features, out_features,  directions, threshold=True, batch_norm=False, dtype=torch.int64, device="cuda"):
         Binarized.__init__(self,in_features, out_features,  directions, threshold, dtype, device)
         self.in_features = in_features
         self.out_features = out_features
@@ -130,9 +130,6 @@ class BinarizedConv2d(Binarized):
 
     def reset_parameters(self):
         Binarized.reset_parameters(self)
-        with torch.no_grad():
-            if self.threshold:
-                self.bias.fill_(self.in_degree * self.kernel_size[0] * self.kernel_size[1] / 2)
 
     def set_noise(self, noise_scale=None):
         Binarized.set_noise(self, noise_scale)
@@ -153,6 +150,8 @@ class BinarizedConv2d(Binarized):
                                                             self.padding, self.padding, self.stride, self.stride) - offset
                     thresh = self.bias + self.bias_noise + activation.type(torch.float16).mean(dim=[1,2])
                     # print(activation.shape, thresh.shape)
+                    # print(activation, thresh)
+                    # exit()
                     return activation > thresh.unsqueeze(1).unsqueeze(1)
                 return booleanOperations.conv_act(packed_input, self.weight_noise_reshaped, (self.bias + self.bias_noise).type(torch.int32) + offset, *self.kernel_size,
                                                   self.padding, self.padding, self.stride, self.stride)

@@ -102,7 +102,7 @@ class Trainer():
                     total_reward += sum_reward.mean()
                     total_reward_discount += sum_reward_discount.mean()
 
-                perturbed_model.set_grad(-step_size)
+                perturbed_model.update(-step_size)
                 # for param in self.model.parameters():
                 #     if param.grad is not None:
                 #         print(param.grad.abs().mean())

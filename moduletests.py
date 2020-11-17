@@ -122,7 +122,7 @@ def test_perm(device="cuda"):
         # w = torch.ones(d,device=device)
         torch.cuda.synchronize()
         start = time.time()
-        l.set_grad(w)
+        l.update(w)
         torch.cuda.synchronize()
         print(time.time() - start)
 
@@ -147,7 +147,7 @@ def test_perm_conv(device="cuda"):
         start = time.time()
         l.perturbed_flag = True
         l.forward(inp)
-        l.set_grad(w)
+        l.update(w)
         torch.cuda.synchronize()
         print(time.time() - start)
     for _ in range(10):
@@ -161,67 +161,176 @@ def test_perm_conv(device="cuda"):
         start = time.time()
         l.perturbed_flag = False
         l.forward(inp)
-        # l.set_grad(w)
+        # l.update(w)
         torch.cuda.synchronize()
         print("off",time.time() - start)
 
 
-def time_forward_median(layer, input, times, repeat=1):
+def time_func_median(func, input, times, repeat=1):
     results = []
     for _ in range(times):
         torch.cuda.synchronize()
         start = time.time()
         for _ in range(repeat):
-            layer.forward(input)
+            func(input)
         torch.cuda.synchronize()
         results += [time.time() - start]
     return 1000 * sorted(results)[times//2]
 
-def test_linear(device="cuda", batch_size=1024, times=200):
-    ret = defaultdict(lambda:dict())
+def get_linear_layers(input_dim, output_dim, batch_size, device="cuda", type=torch.float32):
+    l = PerturbedLinear(input_dim, output_dim, batch_size).to(device)
+    l2 = PerturbedLinear(input_dim, output_dim, batch_size // 2).to(device)
+    plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device)
+    pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device)
+    plo2 = PermutedLinear(input_dim, output_dim, batch_size // 2, permutation="out").to(device)
+    pli2 = PermutedLinear(input_dim, output_dim, batch_size // 2, permutation="in").to(device)
+    plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
+    nlo = SyntheticLinear(input_dim, output_dim, batch_size, flip="out").to(device)
+    nli = SyntheticLinear(input_dim, output_dim, batch_size, flip="in").to(device)
+    nli2 = SyntheticLinear(input_dim, output_dim, batch_size // 2, flip="in").to(device)
+    nlb = SyntheticLinear(input_dim, output_dim, batch_size, flip="both").to(device)
+    splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.99).to(device)
+    s2pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.5).to(device)
+    s10pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1).to(device)
+    s10plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device)
+    return [
+            # (l, "Batch Matrix Multiplication"),
+            # (l2, "Antithetic Sampling"),
+            (pli, "Permuted Sampling"),
+            (pli2, "Antithetic Permuted Sampling"),
+            (plo, "PermutedLinearOut"),
+            (plb, "PermutedLinearBoth"),
+            (nli, "Synthetic Sampling"),
+            (nli2, "Antithetic Synthetic Sampling"),
+            (nlo, "SyntheticLinearOut"),
+            (nlb, "SyntheticLinearBoth"),
+            (s2pli, "Permuted Sampling(in_sparsity=.5)"),
+            (s10pli, "Permuted Sampling(in_sparsity=.1)"),
+            (s10plb, "PermutedLinear(in_sparsity=.1,out_sparsity=.1)")
+            ]
+
+def get_conv_layers(input_dim, output_dim, filter_size, batch_size, device="cuda"):
+    l = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size, mode="direct").to(device)
+    l2 = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size // 2).to(device)
+    plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out").to(device)
+    pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in").to(device)
+    plb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both").to(device)
+    nli = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="in").to(device)
+    nlo = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="out").to(device)
+    nlb = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="both").to(device)
+    spli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in", out_sparsity=.5).to(device)
+    spli2 = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in", out_sparsity=.1).to(device)
+    splo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.5).to(device)
+    splo2 = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.1).to(device)
+    splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device)
+    return [
+        (l, "Batch Convolution"),
+        (l2, "Antithetic Sampling"),
+        (plo, "Permuted Sampling"),
+        (nli, "Synthetic Sampling"),
+        (nlo, "SyntheticConv2dOut"),
+        (nlb, "SyntheticConv2dBoth"),
+        (spli, "Permuted Sampling(in_sparsity=.5)"),
+        (spli2, "Permuted Sampling(in_sparsity=.1)"),
+        (splo, "Permuted Sampling(out_sparsity=.5)"),
+        (splo2, "Permuted Sampling(out_sparsity=.1)")
+    ]
+
+
+def test_linear(device="cuda", batch_size=1024, times=100, func="forward", type=torch.float32):
+    if device == "both":
+        device = "cuda"
+        add_cpu = True
+    else:
+        add_cpu = False
+    ret = defaultdict(lambda: dict())
     for test in [(256, 256), (512, 512), (1024, 1024)]:
+    # for test in [(256, 256), (512, 512)]:
+    # for test in [(32, 32), (64, 64), (128, 128)]:
         output_dim, input_dim = test
-        l = PerturbedLinear(input_dim, output_dim, batch_size).to(device)
-        s1 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=1).to(device)
-        s2 = SparsePerturbedLinear(input_dim, output_dim, batch_size, sparsity=2).to(device)
-        plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device)
-        pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device)
-        plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
-        nlo = SyntheticLinear(input_dim, output_dim, batch_size, flip="out").to(device)
-        nli = SyntheticLinear(input_dim, output_dim, batch_size, flip="in").to(device)
-        nlb = SyntheticLinear(input_dim, output_dim, batch_size, flip="both").to(device)
-        splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.99).to(device)
-        spli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.5).to(device)
-        spli2 = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1).to(device)
-        splb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device)
-        if device == "cuda":
-            for layer, name in [(l, "PerturbedLinear"),
-                                (s1, "SparsePerturbedLinear (k=1)"), (s2, "SparsePerturbedLinear (k=2)"),
-                                (pli, "PermutedLinear"),
-                                (plo, "PermutedLinearOut"),
-                                (nli, "SyntheticLinear"),
-                                (nlo, "SyntheticLinearOut"),
-                                (nlb, "SyntheticLinearBoth"),
-                                (spli, "PermutedLinear(in_sparsity=.5)"),
-                                (spli2, "PermutedLinear(in_sparsity=.1)")
-                                ]:
-                layer.allocate_memory()
-                layer.set_noise_scale(1.)
-                layer.set_seed()
-                layer.set_noise()
+        for layer, name in get_linear_layers(input_dim, output_dim, batch_size, device, type):
+            layer.allocate_memory()
+            layer.set_noise_scale(1.)
+            layer.set_seed()
+            layer.set_noise()
 
-                layer.perturbed_flag = True
-
+            layer.perturbed_flag = True
+            print(name)
+            if func == "forward":
                 inp = torch.rand(batch_size, input_dim, device=device)
-                ret[str(test)][name] = time_forward_median(layer, inp, times)
-        l.perturbed_flag = False
-        inp = torch.rand(batch_size, input_dim, device=device)
-        ret[str(test)]["Base"] = time_forward_median(l, inp, times)
-        ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
+            elif func =="update":
+                inp = torch.rand(layer.directions, device=device)
+            # if device == "cpu":
+            #     break
+            ret[str(test)][name] = time_func_median(getattr(layer, func), inp, times)
+            layer.free_memory()
+        layer.perturbed_flag = False
+        if func == "forward":
+            ret[str(test)]["Base"] = time_func_median(getattr(layer, func), inp, times)
+            repeat = min(1024, batch_size)
+            ret[str(test)]["Naive"] = time_func_median(getattr(layer, func), inp[:1], times, repeat=repeat) \
+                * (batch_size // repeat)
+            if add_cpu:
+                torch.set_num_threads(1)
+                layer = layer.to("cpu")
+                inp = inp.to("cpu")
+                ret[str(test)]["Naive (CPU)"] = time_func_median(getattr(layer, func), inp[:1], times) * batch_size
     return ret
 
-def test_conv(device="cuda", batch_size=1024, times=100):
-    ret = defaultdict(lambda:dict())
+def test_layers(device="cuda", batch_size=1024, times=100, func="forward", type=torch.float32, base="linear"):
+    if device == "both":
+        device = "cuda"
+        add_cpu = True
+    else:
+        add_cpu = False
+    ret = defaultdict(lambda: dict())
+    if base == "linear":
+        tests = [(256, 256), (512, 512), (1024, 1024)]
+    elif base == "conv":
+        tests = [(16, 16, (3, 3), (64, 64)),
+                 (32, 32, (3, 3), (64, 64)),
+                 (64, 64, (3, 3), (32, 32)),
+                 (32, 32, (1, 1), (32, 32)),
+                 (1024, 1024, (1, 1), (1, 1))]
+    for test in tests:
+        if base == "linear":
+            output_dim, input_dim = test
+            layers = get_linear_layers(input_dim, output_dim, batch_size, device, type)
+        elif base == "conv":
+            output_dim, input_dim, filter_size, image_size = test
+            layers = get_conv_layers(input_dim, output_dim, filter_size, batch_size, device)
+
+        for layer, name in layers:
+            layer.allocate_memory()
+            layer.set_noise_scale(1.)
+            layer.set_seed()
+            layer.set_noise()
+
+            layer.perturbed_flag = True
+            print(name)
+            if func == "forward":
+                inp = torch.rand(batch_size, input_dim, device=device)
+            elif func =="update":
+                inp = torch.rand(layer.directions, device=device)
+            # if device == "cpu":
+            #     break
+            ret[str(test)][name] = time_func_median(getattr(layer, func), inp, times)
+            layer.free_memory()
+        layer.perturbed_flag = False
+        if func == "forward":
+            ret[str(test)]["Base"] = time_func_median(getattr(layer, func), inp, times)
+            repeat = min(1024, batch_size)
+            ret[str(test)]["Naive"] = time_func_median(getattr(layer, func), inp[:1], times, repeat=repeat) \
+                * (batch_size // repeat)
+            if add_cpu:
+                torch.set_num_threads(1)
+                layer = layer.to("cpu")
+                inp = inp.to("cpu")
+                ret[str(test)]["Naive (CPU)"] = time_func_median(getattr(layer, func), inp[:1], times) * batch_size
+    return ret
+
+def test_conv(device="cuda", batch_size=1024, times=100, func="forward"):
+    ret = defaultdict(lambda: dict())
     for test in \
             [(16, 16, (3, 3), (64, 64)),
              (32, 32, (3, 3), (64, 64)),
@@ -229,36 +338,24 @@ def test_conv(device="cuda", batch_size=1024, times=100):
              (32, 32, (1, 1), (32, 32)),
              (1024, 1024, (1, 1), (1, 1))]:
         output_dim, input_dim, filter_size, image_size = test
-        l = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size).to(device)
-        plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out").to(device)
-        pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in").to(device)
-        plb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both").to(device)
-        nli = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="in").to(device)
-        nlo = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="out").to(device)
-        nlb = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, flip="both").to(device)
-        splo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.5).to(device)
-        splo2 = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="out", out_sparsity=.1).to(device)
-        splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device)
-        for layer, name in [(l, "PerturbedConv2d"), (plo, "PermutedConv2d"),
-                            (nli, "SyntheticConv2dIn"),
-                            (nlo, "SyntheticConv2dOut"),
-                            (nlb, "SyntheticConv2dBoth"),
-                             (splo, "PermutedConv2d(out_sparsity=.5)"),
-                             (splo2, "PermutedConv2d(out_sparsity=.1)")
-                            ]:
+        for layer, name in get_conv_layers(input_dim, output_dim, filter_size, batch_size, device):
             layer.set_noise(1.)
             layer.perturbed_flag = True
-            inp = torch.rand(batch_size, input_dim, *image_size, device=device)
+            if func == "forward":
+                inp = torch.rand(batch_size, input_dim, *image_size, device=device)
+            elif func =="update":
+                inp = torch.rand(layer.directions, device=device)
             print(name)
-            ret[str(test)][name] = time_forward_median(layer, inp, times)
+            ret[str(test)][name] = time_func_median(getattr(layer, func), inp, times)
             try:
                 print(layer.in_sparsity)
-
             except:
                 pass
-        l.perturbed_flag = False
-        ret[str(test)]["Base"] = time_forward_median(l, inp, times)
-        ret[str(test)]["Naive"] = time_forward_median(l, inp[:1], times, repeat=batch_size)
+            layer.free_memory()
+        layer.perturbed_flag = False
+        if func == "forward":
+            ret[str(test)]["Base"] = time_func_median(getattr(layer, func), inp, times)
+            ret[str(test)]["Naive"] = time_func_median(getattr(layer, func), inp[:1], times, repeat=batch_size)
     return ret
 
 
@@ -349,14 +446,20 @@ if __name__ == "__main__":
         pass
         # index_select_vs_gather(size=(1024, 256))
         # torch.set_num_threads(1)
-        # print(test_linear("cpu", batch_size=10))
+        # to_markdown(test_linear("cpu", batch_size=1000, func="update"))
+        # to_markdown(test_linear("cpu", batch_size=32))
+        # to_markdown(test_linear("cuda", batch_size=1024 * 16))
+        # to_markdown(test_linear("cuda", batch_size=1024))
+        to_markdown(test_conv("cuda", batch_size=1024))
+        # to_markdown(test_linear("cuda", batch_size=1024, type=torch.float16))
+        # to_markdown(test_linear("both", batch_size=1024 * 4))
+        # to_markdown(test_linear(batch_size=1024, func="update"))
         # speed_test_conv("cuda")
         # lin_vs_conv("cpu")
         # randperm_speed("cuda")
         # sparse_test("cuda")
         # test_perm_conv("cuda")
         # to_markdown(test_linear("cuda"))
-        # to_markdown(test_linear("cuda"))
-        to_markdown(test_conv("cuda"))
+        # to_markdown(test_conv("cuda"))
         # test_linear("cuda")
         # test_add("cuda")
