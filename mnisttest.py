@@ -42,7 +42,7 @@ class Trainer():
         self.noise_scale = kwargs.get("noise_scale", 3e-3)
         # self.noise_scale_decay = 1 - kwargs.get("noise_scale_decay", 1e-3)
         self.noise_scale_decay = 1 - kwargs.get("noise_scale_decay", 0)
-        self.lr = kwargs.get("lr", 1e0)
+        self.lr = kwargs.get("lr", 1e-3)
         self.weight_decay = kwargs.get("weight_decay",0)
         # self.lr_decay = kwargs.get("lr_decay", 1e-2)
         self.ave_delta_rate = kwargs.get("ave_delta_rate", .99)
@@ -94,7 +94,7 @@ class Trainer():
 
             for batch_idx, (data, target) in enumerate(train_loader):
                 data = data.cuda()
-                data = (data * 255).type(torch.int8)
+                # data = (data * 255).type(torch.int8)
                 target = target.cuda()
                 with torch.no_grad():
                     perturbed_model.set_seed()
@@ -102,7 +102,8 @@ class Trainer():
                     perturbed_model.allocate_memory()
                     perturbed_model.set_noise()
                     pred = perturbed_model.forward(data)
-                    reward = torch.nn.NLLLoss(reduce=False)(pred,target)
+                    # reward = -torch.nn.NLLLoss(reduce=False)(pred,target)
+                    reward = torch.nn.CrossEntropyLoss(reduction="none")(pred, target)
                     result = reward - reward.mean()
                     # step_size = result / ((ave_delta + 1e-5) * self.noise_scale)
                     step_size = result
@@ -136,8 +137,8 @@ if __name__ == "__main__":
     directions = 2 ** 8
 
     # my_model = models.MNISTConvNet(directions=directions, action_size=10,in_channels=1)
-    # my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
-    my_model = models.MNISTBinaryDenseNet(directions=directions, action_size=10,in_channels=1)
+    my_model = models.MNISTDenseNet(directions=directions, action_size=10,in_channels=1)
+    # my_model = models.MNISTBinaryDenseNet(directions=directions, action_size=10,in_channels=1)
     # Trainer(model.TransformerNet()).train()
     if cuda_on:
         my_model = my_model.cuda()

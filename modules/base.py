@@ -42,13 +42,15 @@ class PerturbedModel:
 
 
 class Perturbed:
-    #mode can be residual, direct, or antithetic
-    def __init__(self, directions, mode="residual", bias=True):
+
+    #options["direct"]=True for direct
+    def __init__(self, directions, antithetic=False, options={}):
         self.directions = directions
         self.perturbed_flag = False
         self.noise_scale = None
         self.seed = None
-        self.mode = mode
+        self.antithetic = antithetic
+        self.options = options
         self.free_memory()
 
     def set_noise_scale(self, noise_scale):
@@ -62,26 +64,26 @@ class Perturbed:
         if self.weight_noise is None:
             self.allocate_memory()
         gen = torch.cuda.manual_seed(self.seed)
-        if self.mode == "residual":
-            self.weight_noise.normal_(std=self.noise_scale, generator=gen)
-            if self.bias is not None:
-                self.bias_noise.normal_(std=self.noise_scale, generator=gen)
-        elif self.mode == "direct":
-            self.weight_noise.normal_(std=self.noise_scale, generator=gen)
-            self.weight_noise += self.weight
-            if self.bias is not None:
-                self.bias_noise.normal_(std=self.noise_scale, generator=gen)
-                self.bias_noise += self.bias
-        elif self.mode == "antithetic":
-            self.weight_noise[:self.directions // 2].normal_(std=self.noise_scale, generator=gen)
-            self.weight_noise[self.directions // 2:] = -self.weight_noise[:self.directions // 2]
-            self.weight_noise += self.weight
-            if self.bias is not None:
-                self.bias_noise[:self.directions // 2].normal_(std=self.noise_scale, generator=gen)
-                self.bias_noise[self.directions // 2:] = -self.bias_noise[:self.directions // 2]
-                self.bias_noise += self.bias
+        if self.options.get("direct"):
+            if self.antithetic:
+                self.weight_noise[:self.directions // 2].normal_(std=self.noise_scale, generator=gen)
+                self.weight_noise[self.directions // 2:] = -self.weight_noise[:self.directions // 2]
+                self.weight_noise += self.weight
+                if self.bias is not None:
+                    self.bias_noise[:self.directions // 2].normal_(std=self.noise_scale, generator=gen)
+                    self.bias_noise[self.directions // 2:] = -self.bias_noise[:self.directions // 2]
+                    self.bias_noise += self.bias
+            else:
+                self.weight_noise.normal_(std=self.noise_scale, generator=gen)
+                self.weight_noise += self.weight
+                if self.bias is not None:
+                    self.bias_noise.normal_(std=self.noise_scale, generator=gen)
+                    self.bias_noise += self.bias
         else:
-            print("Mode {} not supported".format(self.mode))
+            self.weight_noise.normal_(std=self.noise_scale, generator=gen)
+            if self.bias is not None:
+                self.bias_noise.normal_(std=self.noise_scale, generator=gen)
+
 
     def set_seed(self, seed=None):
         self.seed = seed if seed is not None else random.randrange(100000000)
@@ -106,36 +108,46 @@ class Perturbed:
             self.bias_noise = None
 
     def update(self, weights, l1=0, l2=0):
-        if self.mode == "residual":
+        if self.options.get("direct"):
+            if self.antithetic:
+                weight_noise = self.weight_noise[self.directions // 2:] - self.weight
+                if self.bias is not None:
+                    bias_noise = self.bias_noise[self.directions // 2:] - self.bias
+            else:
+                weight_noise = self.weight_noise - self.weight
+                if self.bias is not None:
+                    bias_noise = self.bias_noise - self.bias
+        else:
             weight_noise = self.weight_noise
             if self.bias is not None:
                 bias_noise = self.bias_noise
-        elif self.mode == "direct":
-            weight_noise = self.weight_noise - self.weight
-            if self.bias is not None:
-                bias_noise = self.bias_noise - self.bias
-        elif self.mode == "antithetic":
-            weight_noise = self.weight_noise[self.directions // 2:] - self.weight
-            if self.bias is not None:
-                bias_noise = self.bias_noise[self.directions // 2:] - self.bias
         self.weight.grad = (weights @ weight_noise.view(self.directions, -1)).view(*self.weight.size())
         if l1:
             self.weight.grad += l1 * torch.sign(self.weight)
         if l2:
             self.weight.grad += l2 * self.weight
         if self.bias is not None:
-            self.bias.grad = weights @ bias_noise
+            self.bias.grad = (weights @ bias_noise.view(self.directions, -1)).view(*self.bias.size())
             return self.weight.grad, self.bias.grad
         return self.weight.grad
 
 
 
 class Permuted(Perturbed):
-
-    def __init__(self,  in_degree, out_degree, directions, bias=True, permutation="auto", in_sparsity=0, out_sparsity=0):
-        Perturbed.__init__(self, directions, bias)
+    #option["allow_repeats"] for faster sampling, as pytorch currently doesn't have parallel sampling for permutations.
+    #it allows an input or output to be sampled with replacement.
+    def __init__(self,  in_degree, out_degree, directions, antithetic=False, options={}, permutation="auto",
+                 in_sparsity=0, out_sparsity=0):
+        Perturbed.__init__(self, directions, antithetic, options)
         if permutation == "auto":
-            if 1 < in_degree < 32 and 1 < out_degree < 32:
+            if in_sparsity:
+                if out_sparsity:
+                    permutation = "both"
+                else:
+                    permutation = "in"
+            elif out_sparsity:
+                permutation = "out"
+            elif 1 < in_degree < 32 and 1 < out_degree < 32:
                 permutation = "both"
             elif in_degree > out_degree:
                 permutation = "in"
@@ -151,20 +163,21 @@ class Permuted(Perturbed):
             self.permute_inputs = False
             self.permute_outputs = True
         else:
-            print("Permutation setting not recognized")
-            raise NotImplementedError
+            raise NotImplementedError("Permutation setting not recognized")
         self.in_degree = in_degree
         self.out_degree = out_degree
-        self.in_sparsity = int(in_sparsity * self.in_degree) if isinstance(in_sparsity, float) else in_sparsity
+        self.in_sparsity = max(1, int(in_sparsity * self.in_degree)) if isinstance(in_sparsity, float) else in_sparsity
         if self.in_sparsity:
             self.permute_inputs = True
         else:
             self.in_sparsity = self.in_degree
-        self.out_sparsity = int(out_sparsity * self.out_degree) if isinstance(out_sparsity, float) else out_sparsity
+        self.out_sparsity = max(1, int(out_sparsity * self.out_degree)) if isinstance(out_sparsity, float) else out_sparsity
         if self.out_sparsity:
             self.permute_outputs = True
         else:
             self.out_sparsity = self.out_degree
+        if options.get("combined") and self.permute_inputs and self.permute_outputs:
+            raise NotImplementedError("Can't do combined multiplication with both input and output permutations")
 
     def allocate_weight(self):
         self.weight_noise = torch.empty(self.out_sparsity, self.in_sparsity, *self.weight.shape[2:],
@@ -187,17 +200,25 @@ class Permuted(Perturbed):
         self.weight_noise.normal_(std=self.noise_scale * rescale, generator=gen)
         if self.bias is not None:
             self.bias_noise.normal_(std=self.noise_scale, generator=gen)
-        gen = torch.manual_seed(self.seed)
-        if self.permute_outputs:
-            self.output_permutations = torch.empty(self.directions, self.out_degree, dtype=torch.short)
-            for i in range(self.directions):
-                torch.randperm(self.out_degree, out=self.output_permutations[i], generator=gen)
-            self.output_permutations = self.output_permutations.to(self.weight.device)
-        if self.permute_inputs:
-            self.input_permutations = torch.empty(self.directions, self.in_degree, dtype=torch.short)
-            for i in range(self.directions):
-                torch.randperm(self.in_degree, out=self.input_permutations[i], generator=gen)
-            self.input_permutations = self.input_permutations[:, :self.in_sparsity].to(self.weight.device)
+        if self.options.get("allow_repeats"):
+            if self.permute_outputs:
+                self.output_permutations = torch.randint(self.out_degree,
+                     (self.directions, self.out_degree), dtype=torch.short, generator=gen, device=self.weight.device)
+            if self.permute_inputs:
+                self.input_permutations = torch.randint(self.in_degree,
+                     (self.directions, self.in_sparsity), dtype=torch.short, generator=gen, device=self.weight.device)
+        else:
+            gen = torch.manual_seed(self.seed)
+            if self.permute_outputs:
+                self.output_permutations = torch.empty(self.directions, self.out_degree, dtype=torch.short)
+                for i in range(self.directions):
+                    torch.randperm(self.out_degree, out=self.output_permutations[i], generator=gen)
+                self.output_permutations = self.output_permutations.to(self.weight.device)
+            if self.permute_inputs:
+                self.input_permutations = torch.empty(self.directions, self.in_degree, dtype=torch.short)
+                for i in range(self.directions):
+                    torch.randperm(self.in_degree, out=self.input_permutations[i], generator=gen)
+                self.input_permutations = self.input_permutations[:, :self.in_sparsity].to(self.weight.device)
 
     def apply_input_permutation(self, input):
         if self.permute_inputs:
@@ -241,8 +262,9 @@ class Permuted(Perturbed):
 
 class Synthetic(Perturbed):
 
-    def __init__(self, in_degree, out_degree, directions, bias=True, flip="auto", in_sparsity=0, out_sparsity=0):
-        Perturbed.__init__(self, directions, bias)
+    def __init__(self, in_degree, out_degree, directions, antithetic=False, options={},
+                 flip="auto", in_sparsity=0, out_sparsity=0):
+        Perturbed.__init__(self, directions, antithetic, options)
         if flip == "auto":
             if 1 < in_degree < 32 and 1 < out_degree < 32:
                 flip = "both"
@@ -260,14 +282,15 @@ class Synthetic(Perturbed):
             self.flip_inputs = False
             self.flip_outputs = True
         else:
-            print("Flip setting not recognized")
-            raise NotImplementedError
+            raise NotImplementedError("Flip setting not recognized")
         self.in_degree = in_degree
         self.out_degree = out_degree
         if in_sparsity or out_sparsity:
             raise NotImplementedError("Sparsity is not efficient for synthetic sampling, use permuted sampling instead")
         self.in_sparsity = self.in_degree
         self.out_sparsity = self.out_degree
+        if options.get("combined") and self.flip_inputs and self.flip_outputs:
+            raise NotImplementedError("Can't do combined multiplication with both input and output flips")
 
     def allocate_weight(self):
         self.weight_noise = torch.empty(self.out_sparsity, self.in_sparsity, *self.weight.shape[2:],
@@ -292,10 +315,10 @@ class Synthetic(Perturbed):
         if self.bias is not None:
             self.bias_noise.normal_(std=self.noise_scale, generator=gen)
         if self.flip_outputs:
-            self.output_flips = 2 * torch.randint(2, size=(self.directions, self.out_degree), dtype=torch.uint8,
+            self.output_flips = 2 * torch.randint(2, size=(self.directions, self.out_degree), dtype=torch.int8,
                                                   generator=gen, device=self.weight.device) - 1
         if self.flip_inputs:
-            self.input_flips = 2 * torch.randint(2, size=(self.directions, self.in_degree), dtype=torch.uint8,
+            self.input_flips = 2 * torch.randint(2, size=(self.directions, self.in_degree), dtype=torch.int8,
                                                  generator=gen, device=self.weight.device) - 1
 
     def get_flipped_weights(self, weights):
@@ -309,11 +332,13 @@ class Synthetic(Perturbed):
     def update(self, weights, l1=0, l2=0):
         if self.flip_inputs and self.flip_outputs:
             flipped_weights = torch.einsum("d,da,db->ab", weights, self.output_flips, self.input_flips * weights.unsqueeze(1))
-            self.weight.grad = flipped_weights * self.weight_noise
+            for _ in range(len(self.weight.shape) - 2):
+                flipped_weights = flipped_weights.unsqueeze(-1)
         elif self.flip_inputs:
-            self.weight.grad = (self.input_flips * weights.unsqueeze(1)).sum(dim=0).unsqueeze(1) * self.weight_noise
+            flipped_weights = (self.input_flips * weights.unsqueeze(1)).sum(dim=0).view(1, -1, *[1] * (len(self.weight.shape) - 2))
         else:
-            self.weight.grad = (self.output_flips * weights.unsqueeze(1)).sum(dim=0) * self.weight_noise
+            flipped_weights = (self.output_flips * weights.unsqueeze(1)).sum(dim=0).view(-1, *[1] * (len(self.weight.shape) - 1))
+        self.weight.grad = flipped_weights * self.weight_noise
         if l1:
             self.weight.grad += l1 * torch.sign(self.weight)
         if l2:
@@ -325,12 +350,21 @@ class Synthetic(Perturbed):
 
 class PerturbedLinear(nn.Linear, Perturbed):
 
-    def __init__(self, in_features, out_features, directions, mode="residual", bias=True):
+    def __init__(self, in_features, out_features, directions, bias=True, antithetic=False, options={}):
         nn.Linear.__init__(self, in_features, out_features, bias)
-        Perturbed.__init__(self, directions, bias, mode=mode)
+        Perturbed.__init__(self, directions, antithetic, options)
 
     def forward(self, input):
-        if self.mode == "residual" or not self.perturbed_flag:
+        if self.options.get("direct") and self.perturbed_flag:
+            input_by_direction = input.view(-1, self.directions, self.in_features).permute([1, 0, 2])
+            if self.bias is not None:
+                return torch.baddbmm(self.bias_noise.view(self.directions, 1, self.out_features),
+                                     input_by_direction,
+                                     self.weight_noise.permute([0, 2, 1])).permute([1, 0, 2])
+            else:
+                return torch.bmm(input_by_direction,
+                                 self.weight_noise.permute([0, 2, 1])).permute([1, 0, 2])
+        else:
             unperturbed = F.linear(input, self.weight, self.bias)
             if self.perturbed_flag:
                 input_by_direction = input.view(-1, self.directions, self.in_features).permute([1, 0, 2])
@@ -342,28 +376,20 @@ class PerturbedLinear(nn.Linear, Perturbed):
                 else:
                     perturbations = torch.bmm(input_by_direction,
                                               self.weight_noise.permute([0, 2, 1])).permute([1, 0, 2])
-                perturbations[(repeat_size + 1) // 2:] *= -1
+                if self.antithetic:
+                    perturbations[(repeat_size + 1) // 2:] *= -1
                 add = (unperturbed.view_as(perturbations) + perturbations).view_as(unperturbed)
                 return add
             return unperturbed
-        else:
-            input_by_direction = input.view(-1, self.directions, self.in_features).permute([1, 0, 2])
-            if self.bias is not None:
-                return torch.baddbmm(self.bias_noise.view(self.directions, 1, self.out_features),
-                                              input_by_direction,
-                                              self.weight_noise.permute([0, 2, 1])).permute([1, 0, 2])
-            else:
-                return torch.bmm(input_by_direction,
-                                          self.weight_noise.permute([0, 2, 1])).permute([1, 0, 2])
 
 
 class PerturbedConv2d(nn.Conv2d, Perturbed):
 
     def __init__(self, in_channels, out_channels, kernel_size, directions, stride=1, 
                  padding=0, dilation=1, groups=1, 
-                 bias=True, mode="residual", padding_mode='zeros'):
+                 bias=True, antithetic=False, options={}, padding_mode='zeros'):
         nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, padding_mode)
-        Perturbed.__init__(self, directions, bias=bias, mode=mode)
+        Perturbed.__init__(self, directions, antithetic, options)
 
 
 
@@ -374,10 +400,18 @@ class PerturbedConv2d(nn.Conv2d, Perturbed):
             padding = module_utils._pair(0)
         else:
             padding = self.padding
-        if self.mode == "residual" or not self.perturbed_flag:
+        if self.options.get("direct") and self.perturbed_flag:
+            bias_noise = self.bias_noise.view(-1) if self.bias is not None else None
+            input_view = input.view(-1, self.directions * self.in_channels, *input.size()[-2:])
+            repeat_size = input_view.size(0)
+            torch.cuda.synchronize()
+            perturbations = F.conv2d(input_view, self.weight_noise.view(-1, *self.weight.size()[1:]), None, self.stride,
+                                     padding, self.dilation, self.groups * self.directions)
+            torch.cuda.synchronize()
+            return perturbations.view(repeat_size, self.directions, self.out_channels, *perturbations.shape[-2:])
+        else:
             unperturbed = F.conv2d(input, self.weight, self.bias, self.stride,
                                    padding, self.dilation, self.groups)
-
             if self.perturbed_flag:
                 bias_noise = self.bias_noise.view(-1) if self.bias is not None else None
                 input_view = input.view(-1, self.directions * self.in_channels, *input.size()[-2:])
@@ -386,47 +420,94 @@ class PerturbedConv2d(nn.Conv2d, Perturbed):
                                          padding, self.dilation, self.groups * self.directions)
                 perturbations = perturbations.view(repeat_size, self.directions, self.out_channels,
                                                    *perturbations.size()[-2:])
-                perturbations[(repeat_size + 1) // 2:] *= -1
+                if self.antithetic:
+                    perturbations[(repeat_size + 1) // 2:] *= -1
                 add = unperturbed + perturbations.view_as(unperturbed)
                 return add
             return unperturbed
+
+class PerturbedAffine(nn.Module, Perturbed):
+
+    def __init__(self, normalized_shape, directions, antithetic=False, options={"direct": True}):
+        nn.Module.__init__(self)
+        self.weight = nn.Parameter(torch.ones(normalized_shape))
+        self.bias = nn.Parameter(torch.zeros(normalized_shape))
+        if not options.get("direct"):
+            raise NotImplementedError("Only direct is implemented")
+        Perturbed.__init__(self, directions, antithetic=antithetic, options=options)
+
+    def forward(self, input):
+        if self.perturbed_flag:
+            weight = self.weight_noise
+            bias = self.bias_noise
         else:
-            bias_noise = self.bias_noise.view(-1) if self.bias is not None else None
-            input_view = input.view(-1, self.directions * self.in_channels, *input.size()[-2:])
-            repeat_size = input_view.size(0)
-            perturbations = F.conv2d(input_view, self.weight_noise.view(-1, *self.weight.size()[1:]), bias_noise, self.stride,
-                                     padding, self.dilation, self.groups * self.directions)
-            return perturbations.view(repeat_size, self.directions, self.out_channels, *perturbations.shape[-2:])
+            weight = self.weight
+            bias = self.bias
+        return input * weight + bias
 
 
 class PermutedLinear(nn.Linear, Permuted):
 
-    def __init__(self, in_features, out_features, directions, bias=True, permutation="auto", in_sparsity=0, out_sparsity=0):
+    def __init__(self, in_features, out_features, directions, bias=True, antithetic=False, options={},
+                 permutation="auto", in_sparsity=0, out_sparsity=0):
         nn.Linear.__init__(self, in_features, out_features, bias)
-        Permuted.__init__(self, in_features, out_features, directions, bias=bias,
+        Permuted.__init__(self, in_features, out_features, directions,
+                          antithetic=antithetic, options=options,
                           permutation=permutation, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
 
     def forward(self, input):
-        unperturbed = F.linear(input, self.weight, self.bias)
-        if self.perturbed_flag:
-            input_view = input.view(-1, self.directions * self.in_features)
-            repeat_size = input_view.size(0)
-            permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity)
-            if self.out_sparsity < self.out_degree:
-                perturbations = torch.zeros_like(unperturbed)
-                torch.mm(permuted_input, self.weight_noise.t(),out=perturbations.view(-1,self.out_features)[:, :self.out_sparsity])
-                perturbations = perturbations.view(repeat_size,
-                                                          self.directions * self.out_features)
-            else:
-                perturbations = torch.mm(permuted_input, self.weight_noise.t()).view(repeat_size,
-                                                                                     self.directions * self.out_features)
-            permuted_output = self.apply_output_permutation(perturbations).view(repeat_size, self.directions, self.out_features)
-            if self.bias is not None:
-                permuted_output += self.bias_noise
-            permuted_output[(repeat_size + 1) // 2:] *= -1
-            add = unperturbed + permuted_output.view_as(unperturbed)
-            return add
-        return unperturbed
+        if self.options.get("combined") and self.perturbed_flag:
+            if self.permute_inputs:
+                input_view = input.view(-1, self.directions * self.in_features)
+                permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity)
+                combined_input = torch.cat([input.view(-1, self.in_features), permuted_input], dim=1)
+                combined_weights = torch.cat([self.weight, self.weight_noise], dim=1)
+                combined_bias = self.bias
+                return F.linear(combined_input, combined_weights, combined_bias)
+            elif self.permute_outputs:
+                input_view = input.view(-1, self.in_features)
+                repeat_size = input_view.size(0) // self.directions
+                combined_weights = torch.cat([self.weight, self.weight_noise], dim=0)
+                if self.out_sparsity < self.out_degree or True:
+                    combined_output = torch.zeros((repeat_size, self.directions * self.out_features, 2), device=input.device, dtype=input.dtype)
+                    torch.mm(input_view, combined_weights.t(), out=combined_output.view(-1, 2 * self.out_features)[:, :self.out_features + self.out_sparsity])
+                else:
+                    combined_output = torch.mm(input_view, combined_weights.t())
+
+
+                perturbations = combined_output[:, :, 1].view(repeat_size, self.directions * self.out_features)
+                permuted_output = self.apply_output_permutation(perturbations).view(repeat_size,
+                                                                                    self.directions, self.out_features)
+                if self.bias is not None:
+                    permuted_output += self.bias_noise
+                if self.antithetic:
+                    permuted_output[(repeat_size + 1) // 2:] *= -1
+                add = combined_output[:, :, 0].view(-1, self.out_features) + permuted_output.view(-1, self.out_features)
+                if self.bias is not None:
+                    add += self.bias
+                return add
+        else:
+            unperturbed = F.linear(input, self.weight, self.bias)
+            if self.perturbed_flag:
+                input_view = input.view(-1, self.directions * self.in_features)
+                repeat_size = input_view.size(0)
+                permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity)
+                if self.out_sparsity < self.out_degree:
+                    perturbations = torch.zeros_like(unperturbed)
+                    torch.mm(permuted_input, self.weight_noise.t(), out=perturbations.view(-1, self.out_features)[:, :self.out_sparsity])
+                    perturbations = perturbations.view(repeat_size,
+                                                              self.directions * self.out_features)
+                else:
+                    perturbations = torch.mm(permuted_input, self.weight_noise.t()).view(repeat_size,
+                                                                                         self.directions * self.out_features)
+                permuted_output = self.apply_output_permutation(perturbations).view(repeat_size, self.directions, self.out_features)
+                if self.bias is not None:
+                    permuted_output += self.bias_noise
+                if self.antithetic:
+                    permuted_output[(repeat_size + 1) // 2:] *= -1
+                add = unperturbed + permuted_output.view_as(unperturbed)
+                return add
+            return unperturbed
 
     def update(self, weights, l1=0, l2=0):
         permutation_weights = self.get_permutation_weights(weights)
@@ -450,9 +531,11 @@ class PermutedConv2d(nn.Conv2d, Permuted):
 
     def __init__(self, in_channels, out_channels, kernel_size, directions, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros', permutation="auto", in_sparsity=0, out_sparsity=0):
+                 bias=True, antithetic=False, options={},
+                 padding_mode='zeros', permutation="auto", in_sparsity=0, out_sparsity=0):
         nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, padding_mode)
-        Permuted.__init__(self, in_channels, out_channels, directions, bias=bias,
+        Permuted.__init__(self, in_channels, out_channels, directions,
+                          antithetic=antithetic, options=options,
                           permutation=permutation, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
 
     def forward(self, input):
@@ -461,37 +544,57 @@ class PermutedConv2d(nn.Conv2d, Permuted):
             padding = module_utils._pair(0)
         else:
             padding = self.padding
-        unperturbed = F.conv2d(input, self.weight, self.bias, self.stride,
-                               padding, self.dilation, self.groups)
+        if self.options.get("combined") and self.perturbed_flag:
+            if self.permute_inputs:
+                input_dims = input.shape[-2:]
+                input_view = input.view(-1, self.directions * self.in_channels, *input_dims)
+                repeat_size = input_view.size(0)
+                permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity, *input_dims)
+                if self.antithetic:
+                    permuted_input.view(repeat_size, self.directions, self.in_sparsity, *input_dims)[(repeat_size + 1) // 2:] *= -1
+                combined_input = torch.cat([input.view(-1, self.in_channels, *input_dims), permuted_input], dim=1)
+                combined_weights = torch.cat([self.weight, self.weight_noise], dim=1)
+                result = F.conv2d(combined_input, combined_weights, self.bias, self.stride,
+                         padding, self.dilation, self.groups)
+                if self.bias is not None:
+                    if self.antithetic:
+                        result.view(repeat_size, self.directions, *result.shape[1:])[:(repeat_size + 1) // 2] += self.bias_noise.unsqueeze(-1).unsqueeze(-1)
+                        result.view(repeat_size, self.directions, *result.shape[1:])[(repeat_size + 1) // 2:] -= self.bias_noise.unsqueeze(-1).unsqueeze(-1)
+                    else:
+                        return result + self.bias_noise.unsqueeze(-1).unsqueeze(-1)
+                return result
+        else:
+            unperturbed = F.conv2d(input, self.weight, self.bias, self.stride,
+                                   padding, self.dilation, self.groups)
+            if self.perturbed_flag:
+                input_dims = input.shape[-2:]
+                output_dims = unperturbed.shape[-2:]
+                input_view = input.view(-1, self.directions * self.in_channels, *input_dims)
+                repeat_size = input_view.size(0)
 
-        if self.perturbed_flag:
-            input_dims = input.shape[-2:]
-            output_dims = unperturbed.shape[-2:]
-            input_view = input.view(-1, self.directions * self.in_channels, *input_dims)
-            repeat_size = input_view.size(0)
-
-            permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity, *input_dims)
-            if self.out_sparsity < self.out_degree:
-                perturbations = torch.zeros_like(unperturbed)
-                perturbations.view(-1, self.out_channels, *output_dims)[:, :self.out_sparsity] = \
-                    F.conv2d(permuted_input, self.weight_noise, None, self.stride, padding, self.dilation, self.groups)
-            else:
-                perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
-                                         padding, self.dilation, self.groups)
+                permuted_input = self.apply_input_permutation(input_view).view(-1, self.in_sparsity, *input_dims)
+                if self.out_sparsity < self.out_degree:
+                    perturbations = torch.zeros_like(unperturbed)
+                    perturbations.view(-1, self.out_channels, *output_dims)[:, :self.out_sparsity] = \
+                        F.conv2d(permuted_input, self.weight_noise, None, self.stride, padding, self.dilation, self.groups)
+                else:
+                    perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
+                                             padding, self.dilation, self.groups)
 
 
-            # permuted_input = self.apply_input_permutation(input_view).view_as(input)
-            # print(input.shape,permuted_input.shape,input_view.shape)
-            # perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
-            #                          padding, self.dilation, self.groups)
-            permuted_output = self.apply_output_permutation(perturbations.view(repeat_size, self.directions * self.out_channels,
-                                                                     *perturbations.shape[-2:])).view_as(unperturbed)
-            if self.bias is not None:
-                permuted_output += self.bias_noise.unsqueeze(-1).unsqueeze(-1)
-            permuted_output.view(repeat_size, -1)[(repeat_size + 1) // 2:] *= -1
-            add = unperturbed + permuted_output
-            return add
-        return unperturbed
+                # permuted_input = self.apply_input_permutation(input_view).view_as(input)
+                # print(input.shape,permuted_input.shape,input_view.shape)
+                # perturbations = F.conv2d(permuted_input, self.weight_noise, None, self.stride,
+                #                          padding, self.dilation, self.groups)
+                permuted_output = self.apply_output_permutation(perturbations.view(repeat_size, self.directions * self.out_channels,
+                                                                         *perturbations.shape[-2:])).view_as(unperturbed)
+                if self.bias is not None:
+                    permuted_output += self.bias_noise.unsqueeze(-1).unsqueeze(-1)
+                if self.antithetic:
+                    permuted_output.view(repeat_size, -1)[(repeat_size + 1) // 2:] *= -1
+                add = unperturbed + permuted_output
+                return add
+            return unperturbed
 
     def update(self, weights, l1=0, l2=0):
         permutation_weights = self.get_permutation_weights(weights)
@@ -514,36 +617,44 @@ class PermutedConv2d(nn.Conv2d, Permuted):
 
 class SyntheticLinear(nn.Linear, Synthetic):
 
-    def __init__(self, in_features, out_features, directions, bias=True, flip="auto", in_sparsity=0, out_sparsity=0):
+    def __init__(self, in_features, out_features, directions, bias=True, antithetic=False, options={},
+                 flip="auto", in_sparsity=0, out_sparsity=0):
         nn.Linear.__init__(self, in_features, out_features, bias)
-        Synthetic.__init__(self, in_features, out_features, directions, bias=bias,
+        Synthetic.__init__(self, in_features, out_features, directions,
+                           antithetic=antithetic, options=options,
                            flip=flip, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
 
 
     def forward(self, input):
-        unperturbed = F.linear(input, self.weight, self.bias)
-        if self.perturbed_flag:
-            input_view = input.view(-1, self.directions, self.in_features)
-            repeat_size = input_view.size(0)
-            flipped_input = input_view * self.input_flips if self.flip_inputs else input_view
-            perturbations = flipped_input @ self.weight_noise.t()
-            flipped_output = (perturbations * self.output_flips if self.flip_outputs else perturbations)
-            if self.bias is not None:
-                flipped_output += self.bias_noise
-            flipped_output[(repeat_size + 1) // 2:] *= -1
-            add = unperturbed + flipped_output.view_as(unperturbed)
-            return add
-        return unperturbed
+        if self.options.get("combined") and self.perturbed_flag:
+            pass
+        else:
+            unperturbed = F.linear(input, self.weight, self.bias)
+            if self.perturbed_flag:
+                input_view = input.view(-1, self.directions, self.in_features)
+                repeat_size = input_view.size(0)
+                flipped_input = input_view * self.input_flips if self.flip_inputs else input_view
+                perturbations = flipped_input @ self.weight_noise.t()
+                flipped_output = (perturbations * self.output_flips if self.flip_outputs else perturbations)
+                if self.bias is not None:
+                    flipped_output += self.bias_noise
+                if self.antithetic:
+                    flipped_output[(repeat_size + 1) // 2:] *= -1
+                add = unperturbed + flipped_output.view_as(unperturbed)
+                return add
+            return unperturbed
 
 
 class SyntheticConv2d(nn.Conv2d, Synthetic):
 
     def __init__(self, in_channels, out_channels, kernel_size, directions, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros', flip="auto", in_sparsity=0, out_sparsity=0):
+                 bias=True, antithetic=False, options={},
+                 padding_mode='zeros', flip="auto", in_sparsity=0, out_sparsity=0):
         nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, padding_mode)
-        Synthetic.__init__(self, in_channels, out_channels, directions, bias=bias,
-                          flip=flip, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
+        Synthetic.__init__(self, in_channels, out_channels, directions,
+                           antithetic=antithetic, options=options,
+                           flip=flip, in_sparsity=in_sparsity, out_sparsity=out_sparsity)
 
     def forward(self, input):
         if self.padding_mode != 'zeros':
@@ -551,22 +662,25 @@ class SyntheticConv2d(nn.Conv2d, Synthetic):
             padding = module_utils._pair(0)
         else:
             padding = self.padding
-        unperturbed = F.conv2d(input, self.weight, self.bias, self.stride,
-                               padding, self.dilation, self.groups)
-
-        if self.perturbed_flag:
-            input_dims = input.shape[-2:]
-            output_dims = unperturbed.shape[-2:]
-            input_view = input.view(-1, self.directions, self.in_channels, *input_dims)
-            repeat_size = input_view.size(0)
-            flipped_input = input_view * self.input_flips.unsqueeze(2).unsqueeze(3) if self.flip_inputs else input_view
-            perturbations = F.conv2d(flipped_input.view(-1, self.in_sparsity, *input_dims), self.weight_noise, None, self.stride,
-                                         padding, self.dilation, self.groups)
-            flipped_output = (perturbations * self.output_flips.unsqueeze(2).unsqueeze(3) if self.flip_outputs else perturbations)
-            if self.bias is not None:
-                flipped_output += self.bias_noise.unsqueeze(-1).unsqueeze(-1)
-            flipped_output.view(repeat_size, -1)[(repeat_size + 1) // 2:] *= -1
-            add = unperturbed + flipped_output
-            return add
-        return unperturbed
+        if self.options.get("combined") and self.perturbed_flag:
+            pass
+        else:
+            unperturbed = F.conv2d(input, self.weight, self.bias, self.stride,
+                                   padding, self.dilation, self.groups)
+            if self.perturbed_flag:
+                input_dims = input.shape[-2:]
+                output_dims = unperturbed.shape[-2:]
+                input_view = input.view(-1, self.directions, self.in_channels, *input_dims)
+                repeat_size = input_view.size(0)
+                flipped_input = input_view * self.input_flips.unsqueeze(2).unsqueeze(3) if self.flip_inputs else input_view
+                perturbations = F.conv2d(flipped_input.view(-1, self.in_sparsity, *input_dims), self.weight_noise, None, self.stride,
+                                             padding, self.dilation, self.groups)
+                flipped_output = (perturbations * self.output_flips.unsqueeze(2).unsqueeze(3) if self.flip_outputs else perturbations)
+                if self.bias is not None:
+                    flipped_output += self.bias_noise.unsqueeze(-1).unsqueeze(-1)
+                if self.antithetic:
+                    flipped_output.view(repeat_size, -1)[(repeat_size + 1) // 2:] *= -1
+                add = unperturbed + flipped_output
+                return add
+            return unperturbed
 

@@ -1,4 +1,5 @@
-from modules import base, binary
+from modules import base
+# from modules import binary
 import torch
 from torch import nn
 import math
@@ -49,14 +50,14 @@ class MNISTDenseNet(nn.Module):
     def __init__(self, directions, action_size, in_channels=1):
         super(MNISTDenseNet,self).__init__()
         layertype= base.PermutedLinear
-        layers = []
-        # kwargs = {"permutation": "both", "in_sparsity": .1, "out_sparsity": .1}
-        # kwargs = {"permutation": "out", "out_sparsity": .1}
         kwargs = {"permutation": "in", "in_sparsity": .1}
+        kwargs = {"permutation": "in"}
+        layertype= base.SyntheticLinear
+        kwargs = {"flip": "in"}
 
         # layertype=modules.PerturbedLinear
         # kwargs = {}
-
+        layers = []
         for i in range(3):
             layers += [layertype(784, 784, directions, **kwargs)]
             layers += [nn.ELU()]
@@ -67,7 +68,8 @@ class MNISTDenseNet(nn.Module):
 
 
     def forward(self, input):
-        return torch.log_softmax(self.layers.forward(input.reshape(-1,784)).squeeze(),dim=1)
+        return self.layers.forward(input.reshape(-1,784)).squeeze()
+        # return torch.log_softmax(self.layers.forward(input.reshape(-1,784)).squeeze(),dim=1)
 
 
 class MNISTBinaryDenseNet(nn.Module):
