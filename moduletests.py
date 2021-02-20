@@ -409,7 +409,7 @@ def test_combined(device="cuda", batch_size=1024):
              (128, 128, (3, 3), (16, 16)),
              (256, 256, (3, 3), (8, 8)),
              (32, 32, (1, 1), (32, 32)),
-             (1024, 1024, (1, 1), (1, 1))]:
+             (512, 512, (1, 1), (1, 1))]:
         output_dim, input_dim, filter_size, image_size = test
         layer = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, permutation="in", in_sparsity=.1, options={"combined": True}).to(device)
         layer.set_noise(1e-5)
@@ -438,6 +438,7 @@ if __name__ == "__main__":
         # to_markdown(test_layers(batch_size=1024, func="set_noise"))
         # to_markdown(test_layers(batch_size=batch_size, func="update"))
         # to_markdown(test_layers(base="conv", batch_size=1024, func="set_noise"))
+        
         to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16))
         to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16, func="update"))
         # test_combined()
