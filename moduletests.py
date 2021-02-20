@@ -199,7 +199,7 @@ def get_linear_layers(input_dim, output_dim, batch_size, device="cuda", type=tor
     s10plof = PermutedLinear(input_dim, output_dim, batch_size, bias=False, permutation="out", out_sparsity=.1, options={"combined": True}).to(device).type(type)
     s10plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device).type(type)
     return [
-            # (l, "Batch Matrix Multiplication"),
+            (l, "Batch Matrix Multiplication"),
             # (l2, "Antithetic Sampling"),
             (pli, "Permuted Sampling"),
             (plif, "Permuted Sampling Combined"),
@@ -430,7 +430,7 @@ if __name__ == "__main__":
         # to_markdown(test_layers(batch_size=1024, func="set_noise", base="conv"))
         # to_markdown(test_layers(batch_size=1024, func="update", base="conv"))
         # to_markdown(test_layers(batch_size=512, base="conv"))
-        batch_size = 2 ** 18
+        batch_size = 2 ** 12
         to_markdown(test_layers(batch_size=batch_size, type=torch.float16))
         # to_markdown(test_layers(batch_size=1024, type=torch.float16, func="set_noise"))
         to_markdown(test_layers(batch_size=batch_size, type=torch.float16, func="update"))
