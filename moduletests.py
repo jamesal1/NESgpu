@@ -430,7 +430,7 @@ if __name__ == "__main__":
         # to_markdown(test_layers(batch_size=1024, func="set_noise", base="conv"))
         # to_markdown(test_layers(batch_size=1024, func="update", base="conv"))
         # to_markdown(test_layers(batch_size=512, base="conv"))
-        batch_size = 2 ** 12
+        batch_size = 2 ** 10
         # to_markdown(test_layers(batch_size=batch_size, type=torch.float16))
         # to_markdown(test_layers(batch_size=1024, type=torch.float16, func="set_noise"))
         # to_markdown(test_layers(batch_size=batch_size, type=torch.float16, func="update"))
