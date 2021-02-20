@@ -286,7 +286,7 @@ def test_layers(device="cuda", batch_size=1024, times=100, func="forward", type=
             layer.set_seed()
             layer.set_noise()
             layer.perturbed_flag = True
-            # print(name)
+            print(name)
             if func == "forward":
                 if base == "linear":
                     inp = torch.rand(batch_size, input_dim, device=device, dtype=type)
@@ -431,14 +431,14 @@ if __name__ == "__main__":
         # to_markdown(test_layers(batch_size=1024, func="update", base="conv"))
         # to_markdown(test_layers(batch_size=512, base="conv"))
         batch_size = 2 ** 12
-        to_markdown(test_layers(batch_size=batch_size, type=torch.float16))
+        # to_markdown(test_layers(batch_size=batch_size, type=torch.float16))
         # to_markdown(test_layers(batch_size=1024, type=torch.float16, func="set_noise"))
-        to_markdown(test_layers(batch_size=batch_size, type=torch.float16, func="update"))
+        # to_markdown(test_layers(batch_size=batch_size, type=torch.float16, func="update"))
         # to_markdown(test_layers(batch_size=batch_size))
         # to_markdown(test_layers(batch_size=1024, func="set_noise"))
         # to_markdown(test_layers(batch_size=batch_size, func="update"))
         # to_markdown(test_layers(base="conv", batch_size=1024, func="set_noise"))
-        
+
         to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16))
         to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16, func="update"))
         # test_combined()
