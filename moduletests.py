@@ -178,26 +178,26 @@ def time_func_median(func, input, times, repeat=1):
     return 1000 * sorted(results)[times//2]
 
 def get_linear_layers(input_dim, output_dim, batch_size, device="cuda", type=torch.float32):
-    l = PerturbedLinear(input_dim, output_dim, batch_size).to(device)
-    l2 = PerturbedLinear(input_dim, output_dim, batch_size // 2).to(device)
-    plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device)
-    plof = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", options={"combined": True}).to(device)
-    pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device)
-    plif = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", options={"combined": True, "allow_repeats":True}).to(device)
-    plo2 = PermutedLinear(input_dim, output_dim, batch_size // 2, permutation="out").to(device)
-    pli2 = PermutedLinear(input_dim, output_dim, batch_size // 2, permutation="in").to(device)
-    plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device)
-    nlo = SyntheticLinear(input_dim, output_dim, batch_size, flip="out").to(device)
-    nli = SyntheticLinear(input_dim, output_dim, batch_size, flip="in").to(device)
-    nli2 = SyntheticLinear(input_dim, output_dim, batch_size // 2, flip="in").to(device)
-    nlb = SyntheticLinear(input_dim, output_dim, batch_size, flip="both").to(device)
-    splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.99).to(device)
-    s2pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.5).to(device)
-    s10pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1).to(device)
-    s10plif = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1, options={"combined": True, "allow_repeats":True}).to(device)
-    s10plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.1).to(device)
-    s10plof = PermutedLinear(input_dim, output_dim, batch_size, bias=False, permutation="out", out_sparsity=.1, options={"combined": True}).to(device)
-    s10plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device)
+    l = PerturbedLinear(input_dim, output_dim, batch_size).to(device).type(type)
+    l2 = PerturbedLinear(input_dim, output_dim, batch_size // 2).to(device).type(type)
+    plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out").to(device).type(type)
+    plof = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", options={"combined": True}).to(device).type(type)
+    pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in").to(device).type(type)
+    plif = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", options={"combined": True, "allow_repeats":True}).to(device).type(type)
+    plo2 = PermutedLinear(input_dim, output_dim, batch_size // 2, permutation="out").to(device).type(type)
+    pli2 = PermutedLinear(input_dim, output_dim, batch_size // 2, permutation="in").to(device).type(type)
+    plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both").to(device).type(type)
+    nlo = SyntheticLinear(input_dim, output_dim, batch_size, flip="out").to(device).type(type)
+    nli = SyntheticLinear(input_dim, output_dim, batch_size, flip="in").to(device).type(type)
+    nli2 = SyntheticLinear(input_dim, output_dim, batch_size // 2, flip="in").to(device).type(type)
+    nlb = SyntheticLinear(input_dim, output_dim, batch_size, flip="both").to(device).type(type)
+    splo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.99).to(device).type(type)
+    s2pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.5).to(device).type(type)
+    s10pli = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1).to(device).type(type)
+    s10plif = PermutedLinear(input_dim, output_dim, batch_size, permutation="in", in_sparsity=.1, options={"combined": True, "allow_repeats":True}).to(device).type(type)
+    s10plo = PermutedLinear(input_dim, output_dim, batch_size, permutation="out", out_sparsity=.1).to(device).type(type)
+    s10plof = PermutedLinear(input_dim, output_dim, batch_size, bias=False, permutation="out", out_sparsity=.1, options={"combined": True}).to(device).type(type)
+    s10plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device).type(type)
     return [
             # (l, "Batch Matrix Multiplication"),
             # (l2, "Antithetic Sampling"),
@@ -289,11 +289,11 @@ def test_layers(device="cuda", batch_size=1024, times=100, func="forward", type=
             print(name)
             if func == "forward":
                 if base == "linear":
-                    inp = torch.rand(batch_size, input_dim, device=device)
+                    inp = torch.rand(batch_size, input_dim, device=device, dtype=type)
                 elif base == "conv":
-                    inp = torch.rand(batch_size, input_dim, *image_size, device=device)
+                    inp = torch.rand(batch_size, input_dim, *image_size, device=device, dtype=type)
             elif func =="update":
-                inp = torch.rand(layer.directions, device=device)
+                inp = torch.rand(layer.directions, device=device, dtype=type)
             elif func == "set_noise":
                 inp = 1
             # if device == "cpu":
