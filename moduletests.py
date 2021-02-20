@@ -200,7 +200,7 @@ def get_linear_layers(input_dim, output_dim, batch_size, device="cuda", type=tor
     s10plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device).type(type)
     return [
             (l, "Batch Matrix Multiplication"),
-            # (l2, "Antithetic Sampling"),
+            (l2, "Antithetic Sampling"),
             (pli, "Permuted Sampling"),
             (plif, "Permuted Sampling Combined"),
             (pli2, "Antithetic Permuted Sampling"),
@@ -219,23 +219,23 @@ def get_linear_layers(input_dim, output_dim, batch_size, device="cuda", type=tor
             # (s10plb, "PermutedLinear(in_sparsity=.1,out_sparsity=.1)")
             ]
 
-def get_conv_layers(input_dim, output_dim, filter_size, batch_size, device="cuda"):
+def get_conv_layers(input_dim, output_dim, filter_size, batch_size, device="cuda", type=torch.float32):
     padding = 1
-    l = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, options={"direct":True}).to(device)
-    l2 = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size // 2, padding=padding).to(device)
-    plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out").to(device)
-    pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in").to(device)
-    plif = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", options={"combined": True, "allow_repeats": True}).to(device)
-    plb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="both").to(device)
-    nli = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="in").to(device)
-    nlo = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="out").to(device)
-    nlb = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="both").to(device)
-    s2pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.5).to(device)
-    s10pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.1).to(device)
-    s10plif = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.1, options={"combined": True, "allow_repeats": True}).to(device)
-    s2plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out", out_sparsity=.5).to(device)
-    s10plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out", out_sparsity=.1).to(device)
-    splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device)
+    l = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, options={"direct":True}).to(device).type(type)
+    l2 = PerturbedConv2d(input_dim, output_dim, filter_size, batch_size // 2, padding=padding).to(device).type(type)
+    plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out").to(device).type(type)
+    pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in").to(device).type(type)
+    plif = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", options={"combined": True, "allow_repeats": True}).to(device).type(type)
+    plb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="both").to(device).type(type)
+    nli = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="in").to(device).type(type)
+    nlo = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="out").to(device).type(type)
+    nlb = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="both").to(device).type(type)
+    s2pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.5).to(device).type(type)
+    s10pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.1).to(device).type(type)
+    s10plif = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.1, options={"combined": True, "allow_repeats": True}).to(device).type(type)
+    s2plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out", out_sparsity=.5).to(device).type(type)
+    s10plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out", out_sparsity=.1).to(device).type(type)
+    splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device).type(type)
     return [
         (l, "Batch Convolution"),
         (l2, "Antithetic Sampling"),
@@ -278,7 +278,7 @@ def test_layers(device="cuda", batch_size=1024, times=100, func="forward", type=
             layers = get_linear_layers(input_dim, output_dim, batch_size, device, type)
         elif base == "conv":
             output_dim, input_dim, filter_size, image_size = test
-            layers = get_conv_layers(input_dim, output_dim, filter_size, batch_size, device)
+            layers = get_conv_layers(input_dim, output_dim, filter_size, batch_size, device, type)
 
         for layer, name in layers:
             layer.allocate_memory()
@@ -438,8 +438,8 @@ if __name__ == "__main__":
         # to_markdown(test_layers(batch_size=1024, func="set_noise"))
         # to_markdown(test_layers(batch_size=batch_size, func="update"))
         # to_markdown(test_layers(base="conv", batch_size=1024, func="set_noise"))
-        # to_markdown(test_layers(base="conv", batch_size=1024))
-        # to_markdown(test_layers(base="conv", batch_size=1024 * 256, func="update"))
+        to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16))
+        to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16, func="update"))
         # test_combined()
         # to_markdown(test_conv("cuda", batch_size=1024))
         # to_markdown(test_linear("cuda", batch_size=1024, type=torch.float16))
