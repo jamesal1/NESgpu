@@ -107,29 +107,35 @@ class Perturbed:
         if self.bias is not None:
             self.bias_noise = None
 
-    def update(self, weights, l1=0, l2=0):
+    def weight_grad(self, weights):
         if self.options.get("direct"):
             if self.antithetic:
                 weight_noise = self.weight_noise[self.directions // 2:] - self.weight
-                if self.bias is not None:
-                    bias_noise = self.bias_noise[self.directions // 2:] - self.bias
             else:
                 weight_noise = self.weight_noise - self.weight
-                if self.bias is not None:
-                    bias_noise = self.bias_noise - self.bias
         else:
             weight_noise = self.weight_noise
-            if self.bias is not None:
-                bias_noise = self.bias_noise
-        self.weight.grad = (weights @ weight_noise.view(self.directions, -1)).view(*self.weight.size())
+        return (weights @ weight_noise.view(self.directions, -1)).view(*self.weight.size())
+
+    def update(self, weights, l1=0, l2=0):
+        grad = self.weight_grad(weights)
         if l1:
-            self.weight.grad += l1 * torch.sign(self.weight)
+            grad += l1 * torch.sign(self.weight)
         if l2:
-            self.weight.grad += l2 * self.weight
+            grad += l2 * self.weight
+        self.weight.grad = grad if self.weight.grad is None else self.weight.grad + grad
         if self.bias is not None:
-            self.bias.grad = (weights @ bias_noise.view(self.directions, -1)).view(*self.bias.size())
-            return self.weight.grad, self.bias.grad
-        return self.weight.grad
+            if self.options.get("direct"):
+                if self.antithetic:
+                    bias_noise = self.bias_noise[self.directions // 2:] - self.bias
+                else:
+                    bias_noise = self.bias_noise - self.bias
+            else:
+                bias_noise = self.bias_noise
+            bias_grad = (weights @ bias_noise.view(self.directions, -1)).view(*self.bias.size())
+            self.bias.grad = bias_grad if self.bias.grad is None else self.bias.grad + bias_grad
+            return grad, bias_grad
+        return grad
 
 
 
@@ -329,7 +335,7 @@ class Synthetic(Perturbed):
         else:
             return (self.output_flips * weights.unsqueeze(1)).sum(dim=0)
 
-    def update(self, weights, l1=0, l2=0):
+    def weight_grad(self, weights):
         if self.flip_inputs and self.flip_outputs:
             flipped_weights = torch.einsum("d,da,db->ab", weights, self.output_flips, self.input_flips * weights.unsqueeze(1))
             for _ in range(len(self.weight.shape) - 2):
@@ -338,15 +344,7 @@ class Synthetic(Perturbed):
             flipped_weights = (self.input_flips * weights.unsqueeze(1)).sum(dim=0).view(1, -1, *[1] * (len(self.weight.shape) - 2))
         else:
             flipped_weights = (self.output_flips * weights.unsqueeze(1)).sum(dim=0).view(-1, *[1] * (len(self.weight.shape) - 1))
-        self.weight.grad = flipped_weights * self.weight_noise
-        if l1:
-            self.weight.grad += l1 * torch.sign(self.weight)
-        if l2:
-            self.weight.grad += l2 * self.weight
-        if self.bias is not None:
-            self.bias.grad = weights @ self.bias_noise
-            return self.weight.grad, self.bias.grad
-        return self.weight.grad
+        return flipped_weights * self.weight_noise
 
 class PerturbedLinear(nn.Linear, Perturbed):
 
@@ -509,22 +507,15 @@ class PermutedLinear(nn.Linear, Permuted):
                 return add
             return unperturbed
 
-    def update(self, weights, l1=0, l2=0):
+
+    def weight_grad(self, weights):
         permutation_weights = self.get_permutation_weights(weights)
         if self.permute_inputs and self.permute_outputs:
-            self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(-1, 1)).reshape(self.out_features, self.in_features)
+            return torch.mm(permutation_weights, self.weight_noise.view(-1, 1)).reshape(self.out_features, self.in_features)
         elif self.permute_inputs:
-            self.weight.grad = torch.mm(self.weight_noise, permutation_weights)
+            return torch.mm(self.weight_noise, permutation_weights)
         else:
-            self.weight.grad = torch.mm(permutation_weights, self.weight_noise)
-        if l1:
-            self.weight.grad += l1 * torch.sign(self.weight)
-        if l2:
-            self.weight.grad += l2 * self.weight
-        if self.bias is not None:
-            self.bias.grad = weights @ self.bias_noise
-            return self.weight.grad, self.bias.grad
-        return self.weight.grad
+            return torch.mm(permutation_weights, self.weight_noise)
 
 
 class PermutedConv2d(nn.Conv2d, Permuted):
@@ -596,24 +587,16 @@ class PermutedConv2d(nn.Conv2d, Permuted):
                 return add
             return unperturbed
 
-    def update(self, weights, l1=0, l2=0):
+    def weight_grad(self, weights):
         permutation_weights = self.get_permutation_weights(weights)
         if self.permute_inputs and self.permute_outputs:
             sp_size = self.out_sparsity * self.in_sparsity
-            self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(sp_size, -1)).view_as(self.weight)
+            return torch.mm(permutation_weights, self.weight_noise.view(sp_size, -1)).view_as(self.weight)
         elif self.permute_inputs:
-            self.weight.grad = torch.mm(self.weight_noise.permute([0,2,3,1]).contiguous().view(-1,self.in_sparsity),
+            return torch.mm(self.weight_noise.permute([0,2,3,1]).contiguous().view(-1,self.in_sparsity),
                                         permutation_weights).view(self.out_channels, *self.kernel_size,self.in_channels).permute([0,3,1,2])
         else:
-            self.weight.grad = torch.mm(permutation_weights, self.weight_noise.view(self.out_sparsity,-1)).view_as(self.weight)
-        if l1:
-            self.weight.grad += l1 * torch.sign(self.weight)
-        if l2:
-            self.weight.grad += l2 * self.weight
-        if self.bias is not None:
-            self.bias.grad = weights @ self.bias_noise
-            return self.weight.grad, self.bias.grad
-        return self.weight.grad
+            return torch.mm(permutation_weights, self.weight_noise.view(self.out_sparsity,-1)).view_as(self.weight)
 
 class SyntheticLinear(nn.Linear, Synthetic):
 

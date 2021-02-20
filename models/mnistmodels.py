@@ -4,45 +4,57 @@ import torch
 from torch import nn
 import math
 
-filters_mnist = [
-    [16, [4, 4], 2],
-    [32, [4, 4], 2],
-    [256, [8, 8], 1],
-]
+def sequence_builder(li, in_channels, kernel_size, directions, padding, in_sparsity, options, batch_norm, dropout):
+    layers = []
+    for out_channels in li:
+        if isinstance(out_channels, list):
+            seq, in_channels = sequence_builder(out_channels, in_channels, kernel_size, directions, padding, in_sparsity, options, batch_norm, dropout)
+            layers += [Residual(seq)]
+        elif out_channels == "M":
+            layers += [nn.MaxPool2d(2)]
+        elif out_channels == "A":
+            layers += [nn.AvgPool2d(2)]
+        else:
+            layers += [base.PermutedConv2d(in_channels, out_channels, kernel_size, directions,
+                                           padding=padding, in_sparsity=in_sparsity, options=options)]
+            if batch_norm:
+                layers += [nn.BatchNorm2d(out_channels, affine=False)]
+                layers += [base.PerturbedAffine((out_channels, 1, 1), directions)]
+                # layers += [nn.GroupNorm(1,out_channels, affine=False), base.PerturbedAffine((out_channels, 1, 1), directions)]
+                # layers += [base.PerturbedAffine((out_channels, 1, 1), directions)]
+            # layers += [nn.ReLU(inplace=True)]
+            # layers += [nn.Tanh(inplace=True)]
+            layers += [nn.ELU(inplace=True)]
+            # layers += [nn.ELU(inplace=True), base.PerturbedAffine((out_channels, 1, 1), directions)]
+            if dropout > 0:
+                layers+= [nn.Dropout2d(dropout)]
+            in_channels = out_channels
+    return nn.Sequential(*layers), in_channels
+
 
 class MNISTConvNet(nn.Module):
 
-
-    def __init__(self, directions, action_size, in_channels=1):
-        super(MNISTConvNet,self).__init__()
-        filters = filters_mnist
-        kwargs = {"permutation": "both", "in_sparsity": .01, "out_sparsity": .01}
-        kwargs = {"permutation": "out", "out_sparsity": .5}
-        # kwargs = {"permutation": "in", "in_sparsity": .5}
-        layertype= base.PermutedConv2d
-
-        # kwargs = {}
-        # layertype = modules.PerturbedConv2d
-
+    def __init__(self, directions, action_size, in_channels=1, device="cuda"):
+        super(MNISTConvNet, self).__init__()
+        kernel_size = 5
+        padding = 2
+        stride = 1
+        batch_norm = False
+        dropout = 0
+        in_sparsity = 1/16
+        options = {"combined": True, "allow_repeats":True}
+        layer_config = [32, "M", 64, 'M']
         layers = []
-        for out_channels, kernel_size, stride in filters[:-1]:
-            padding = math.ceil((kernel_size[0]-1)/2)
-            layers += [layertype(in_channels, out_channels, kernel_size, directions, stride=stride,
-                                 padding=padding, **kwargs)]
-            layers += [nn.Tanh()]
-            in_channels = out_channels
 
-        out_channels, kernel_size, stride = filters[-1]
-
-        layers += [layertype(in_channels, out_channels, kernel_size, directions, stride, padding=0, **kwargs)]
-        layers += [nn.Tanh()]
-        layers += [layertype(out_channels, action_size, [1,1], directions, stride, padding=0, **kwargs)]
+        seq, in_channels = sequence_builder(layer_config, in_channels, kernel_size, directions, padding, in_sparsity, options, batch_norm, dropout)
+        layers += [seq]
+        layers += [nn.Flatten()]
+        layers += [base.SyntheticLinear(in_channels * 49, 1024, directions)]
+        layers += [base.SyntheticLinear(1024, action_size, directions)]
         self.layers = nn.Sequential(*layers)
 
-
     def forward(self, input):
-        return torch.log_softmax(self.layers.forward(input).squeeze(),dim=1)
-
+        return self.layers.forward(input).squeeze()
 
 class MNISTDenseNet(nn.Module):
 
