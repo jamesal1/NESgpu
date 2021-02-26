@@ -199,23 +199,24 @@ def get_linear_layers(input_dim, output_dim, batch_size, device="cuda", type=tor
     s10plof = PermutedLinear(input_dim, output_dim, batch_size, bias=False, permutation="out", out_sparsity=.1, options={"combined": True}).to(device).type(type)
     s10plb = PermutedLinear(input_dim, output_dim, batch_size, permutation="both", in_sparsity=.1, out_sparsity=.1).to(device).type(type)
     return [
-            (l, "Batch Matrix Multiplication"),
+            (l, "IID Sampling"),
             (l2, "Antithetic Sampling"),
-            (pli, "Permuted Sampling"),
-            (plif, "Permuted Sampling Combined"),
-            (pli2, "Antithetic Permuted Sampling"),
-            (plo, "PermutedLinearOut"),
-            (plof, "PermutedLinearOutCombined"),
+
+            # (plif, "Permuted Sampling Combined"),
+            # (pli2, "Antithetic Permuted Sampling"),
+            # (plo, "PermutedLinearOut"),
+            # (plof, "PermutedLinearOutCombined"),
             # (plb, "PermutedLinearBoth"),
-            (nli, "Synthetic Sampling"),
-            (nli2, "Antithetic Synthetic Sampling"),
-            (nlo, "SyntheticLinearOut"),
-            (nlb, "SyntheticLinearBoth"),
+            (nli, "Sign Flip Sampling"),
+            # (nli2, "Antithetic Synthetic Sampling"),
+            # (nlo, "SyntheticLinearOut"),
+            # (nlb, "SyntheticLinearBoth"),
+            (pli, "Permuted Sampling"),
             (s2pli, "Permuted Sampling(in_sparsity=.5)"),
             (s10pli, "Permuted Sampling(in_sparsity=.1)"),
-            (s10plif, "Permuted Sampling Combined(in_sparsity=.1)"),
-            (s10plo, "Permuted Sampling(out_sparsity=.1)"),
-            (s10plof, "Permuted Sampling Combined(out_sparsity=.1)"),
+            # (s10plif, "Permuted Sampling Combined(in_sparsity=.1)"),
+            # (s10plo, "Permuted Sampling(out_sparsity=.1)"),
+            # (s10plof, "Permuted Sampling Combined(out_sparsity=.1)"),
             # (s10plb, "PermutedLinear(in_sparsity=.1,out_sparsity=.1)")
             ]
 
@@ -232,22 +233,25 @@ def get_conv_layers(input_dim, output_dim, filter_size, batch_size, device="cuda
     nlb = SyntheticConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, flip="both").to(device).type(type)
     s2pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.5).to(device).type(type)
     s10pli = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.1).to(device).type(type)
+    s2plif = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.5, options={"combined": True, "allow_repeats": True}).to(device).type(type)
     s10plif = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="in", in_sparsity=.1, options={"combined": True, "allow_repeats": True}).to(device).type(type)
     s2plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out", out_sparsity=.5).to(device).type(type)
     s10plo = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="out", out_sparsity=.1).to(device).type(type)
     splb = PermutedConv2d(input_dim, output_dim, filter_size, batch_size, padding=padding, permutation="both",out_sparsity=.9, in_sparsity=1.0).to(device).type(type)
     return [
-        (l, "Batch Convolution"),
+        (l, "IID Sampling"),
         (l2, "Antithetic Sampling"),
         # (plo, "Permuted Sampling"),
         # (pli, "Permuted Sampling In"),
-        (plif, "Permuted Sampling Combined"),
-        (nli, "Synthetic Sampling"),
-        (nlo, "SyntheticConv2dOut"),
-        (nlb, "SyntheticConv2dBoth"),
-        # (s2pli, "Permuted Sampling(in_sparsity=.5)"),
-        # (s10pli, "Permuted Sampling(in_sparsity=.1)"),
-        (s10plif, "Permuted Sampling Combined(in_sparsity=.1)"),
+
+        (nli, "Sign Flip Sampling"),
+        # (nlo, "SyntheticConv2dOut"),
+        # (nlb, "SyntheticConv2dBoth"),
+
+        # (s10pli, "Permuted Sampling(in_sparsity=.1)")
+        (plif, "Permuted Sampling"),
+        (s2plif, "Permuted Sampling(in_sparsity=.5)"),
+        (s10plif, "Permuted Sampling(in_sparsity=.1)"),
         # (s2plo, "Permuted Sampling(out_sparsity=.5)"),
         # (s10plo, "Permuted Sampling(out_sparsity=.1)")
     ]
@@ -286,7 +290,7 @@ def test_layers(device="cuda", batch_size=1024, times=100, func="forward", type=
             layer.set_seed()
             layer.set_noise()
             layer.perturbed_flag = True
-            print(name)
+            # print(name)
             if func == "forward":
                 if base == "linear":
                     inp = torch.rand(batch_size, input_dim, device=device, dtype=type)
@@ -313,11 +317,14 @@ def test_layers(device="cuda", batch_size=1024, times=100, func="forward", type=
                 ret[str(test)]["Naive (CPU)"] = time_func_median(getattr(layer, func), inp[:1], times) * batch_size
     return ret
 
-def to_markdown(result_dict):
+def to_markdown(result_dict, filename=None):
     import pandas
     import json
     j = json.dumps(result_dict)
     df = pandas.read_json(json.dumps(result_dict))
+    if filename is not None:
+        df.round(3).to_csv(filename)
+        return
     print("### Time (ms, lower is better)")
     print(df.round(3).to_markdown())
 
@@ -430,17 +437,17 @@ if __name__ == "__main__":
         # to_markdown(test_layers(batch_size=1024, func="set_noise", base="conv"))
         # to_markdown(test_layers(batch_size=1024, func="update", base="conv"))
         # to_markdown(test_layers(batch_size=512, base="conv"))
-        batch_size = 2 ** 9
-        # to_markdown(test_layers(batch_size=batch_size, type=torch.float16))
+        batch_size = 2 ** 13
+        # to_markdown(test_layers(batch_size=batch_size, type=torch.float16), "full.csv")
         # to_markdown(test_layers(batch_size=1024, type=torch.float16, func="set_noise"))
-        # to_markdown(test_layers(batch_size=batch_size, type=torch.float16, func="update"))
+        # to_markdown(test_layers(batch_size=batch_size, type=torch.float16, func="update"), "full_update.csv")
         # to_markdown(test_layers(batch_size=batch_size))
         # to_markdown(test_layers(batch_size=1024, func="set_noise"))
         # to_markdown(test_layers(batch_size=batch_size, func="update"))
         # to_markdown(test_layers(base="conv", batch_size=1024, func="set_noise"))
-
-        to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16))
-        to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16, func="update"))
+        batch_size = 2 ** 9
+        # to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16), "conv.csv")
+        to_markdown(test_layers(base="conv", batch_size=batch_size, type=torch.float16, func="update"),"conv_update.csv")
         # test_combined()
         # to_markdown(test_conv("cuda", batch_size=1024))
         # to_markdown(test_linear("cuda", batch_size=1024, type=torch.float16))

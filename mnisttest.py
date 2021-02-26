@@ -12,6 +12,7 @@ import random
 random.seed(2)
 torch.manual_seed(3)
 device = torch.device("cuda")
+precision = torch.float16
 from timing import timer
 import gc
 def get_memory():
@@ -89,6 +90,15 @@ class Trainer():
         self.max_steps = kwargs.get("max_steps", -1)
         # self.label_smoothing = kwargs.get("label_smoothing", 0.01)
         self.label_smoothing = kwargs.get("label_smoothing", 0.00)
+        self.dataset = datasets.MNIST('../data', train=True, download=True,
+                                      transform=transforms.Compose([
+                                          transforms.ToTensor(),
+                                          transforms.Normalize((0.1307,), (0.3081,)),
+                                      ]))
+        self.images = torch.FloatTensor(self.dataset.data.float()).unsqueeze(1).to(device)
+        self.labels = self.dataset.targets
+        self.labels_tensor = torch.LongTensor(self.labels).to(device)
+        self.loss = LabelSmoothLoss(self.label_smoothing)
 
 
     def train(self):
@@ -98,36 +108,7 @@ class Trainer():
         # opt = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay = self.weight_decay, eps=1e-3)
         opt = torch.optim.SGD(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay, momentum=0)
 
-        # train_loader = torch.utils.data.DataLoader(
-        #     datasets.MNIST('../data', train=True, download=True,
-        #                    transform=transforms.Compose([
-        #                        transforms.ToTensor(),
-        #                        transforms.Normalize((0.1307,), (0.3081,))
-        #                    ])),
-        #     drop_last = True,
-        #     batch_size=self.batch_size, shuffle=True)
-        transform = transforms.Compose([
-            transforms.ToTensor()])
-        self.dataset = datasets.MNIST('../data', train=True, download=True,
-                                        transform=transforms.Compose([
-                                            transforms.ToTensor(),
-                                            transforms.Normalize((0.1307,), (0.3081,)),
-                                        ]))
-        self.images = torch.FloatTensor(self.dataset.data.float()).unsqueeze(1).to(device)
-        self.labels = self.dataset.targets
-        self.labels_tensor = torch.LongTensor(self.labels).to(device)
-        self.loss = LabelSmoothLoss(self.label_smoothing)
         train_set_size = self.images.shape[0]
-        train_loader = torch.utils.data.DataLoader(
-            self.dataset,
-            drop_last = True,
-            batch_size=self.batch_size, shuffle=True)
-        # test_loader = torch.utils.data.DataLoader(
-        #     datasets.CIFAR10('../data', train=False, transform=transforms.Compose([
-        #         transforms.ToTensor(),
-        #         transforms.Normalize((0.1307,), (0.3081,))
-        #     ])),
-        #     batch_size=self.test_batch_size, shuffle=True)
 
         for epoch in range(self.epochs):
             print("Epoch:", epoch)
